@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FantasyDraft — ESPN draft room capture
 // @namespace    fantasydraft
-// @version      0.1
+// @version      0.2
 // @description  Forwards ESPN draft-room traffic and page text to the local FantasyDraft capture server.
 // @match        https://*.espn.com/*
 // @run-at       document-start
@@ -26,14 +26,45 @@
     queue.push(e);
   }
 
+  // Small status badge in the corner so you can see the script is alive.
+  var sent = 0, wsCount = 0, badge = null;
+  function status(text, ok) {
+    if (!document.body) return;
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.style.cssText = 'position:fixed;bottom:6px;left:6px;z-index:2147483647;padding:3px 7px;' +
+        'font:12px/1.3 monospace;border-radius:4px;color:#fff;pointer-events:none;opacity:.85';
+      document.body.appendChild(badge);
+    }
+    badge.style.background = ok ? '#1a7f37' : '#b42318';
+    badge.textContent = 'FantasyDraft capture: ' + text;
+  }
+
   function flush() {
-    if (!queue.length) return;
+    if (!queue.length) {
+      if (!sent) status('running, nothing sent yet', true);
+      return;
+    }
     var batch = queue;
     queue = [];
+    function fail(why) {
+      queue = batch.concat(queue).slice(-5000);  // keep and retry
+      status(why + ' — is "python -m fantasydraft capture" running?', false);
+    }
     GM_xmlhttpRequest({
       method: 'POST', url: SERVER, data: JSON.stringify(batch),
       headers: {'Content-Type': 'application/json'},
-      onerror: function () { queue = batch.concat(queue).slice(-5000); }  // server not running yet: keep, retry
+      onload: function (r) {
+        if (r.status >= 200 && r.status < 300) {
+          sent += batch.length;
+          status('sent ' + sent + ' events (' + wsCount + ' live-feed messages)', true);
+        } else {
+          fail('server replied ' + r.status);
+        }
+      },
+      onerror: function () { fail('cannot reach 127.0.0.1:8765'); },
+      ontimeout: function () { fail('timed out'); },
+      timeout: 5000
     });
   }
   setInterval(flush, 1000);
@@ -44,6 +75,7 @@
     var ws = protocols === undefined ? new NativeWS(url) : new NativeWS(url, protocols);
     record('ws-open', {url: String(url)});
     ws.addEventListener('message', function (ev) {
+      wsCount++;
       record('ws-in', {url: String(url), data: typeof ev.data === 'string' ? ev.data : '[binary ' + (ev.data.size || ev.data.byteLength) + ' bytes]'});
     });
     ws.addEventListener('close', function (ev) { record('ws-close', {url: String(url), code: ev.code}); });

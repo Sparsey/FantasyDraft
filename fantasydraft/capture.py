@@ -56,10 +56,13 @@ def serve(out: str | Path, port: int = 8765) -> None:
                     e["received"] = now
                     f.write(json.dumps(e) + "\n")
                     counts[e.get("kind", "?")] += 1
-                    if e.get("kind") == "ws-in":
+                    kind = e.get("kind", "?")
+                    if kind == "ws-in":
                         print(f"  ws  {str(e.get('data'))[:110]}")
-                    elif e.get("kind") in ("hello", "ws-open", "ws-close"):
-                        print(f"  {e['kind']}: {e.get('url', '')}")
+                    elif kind in ("hello", "ws-open", "ws-close", "fetch"):
+                        print(f"  {kind}: {str(e.get('url', ''))[:110]}")
+                    elif kind == "dom-text":
+                        print(f"  page text snapshot ({len(e.get('data', ''))} chars) — total received: {dict(counts)}")
             self.send_response(204)
             self._cors()
             self.end_headers()
