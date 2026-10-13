@@ -74,8 +74,9 @@ or set it once in `league.json`:
 { "players": "https://docs.google.com/spreadsheets/d/<id>/edit?gid=0#gid=0", ... }
 ```
 
-The `gid` in the link picks the tab. The program downloads a fresh copy every
-time it loads, so your edits show up on the next `recommend`. In `watch`, they
-show up on the next pick (or save `league.json` to force a refresh).
+The `gid` in the link picks the tab. One-off commands (`recommend`,
+`analyze`, …) download a fresh copy each time. `watch`, `draft`, `room` and
+`ui` download it once when they start, which keeps refreshes fast during a
+draft, so restart them to pick up sheet edits made mid-draft.
 
 Players with no projection, and blank rows, are skipped.

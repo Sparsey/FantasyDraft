@@ -50,8 +50,18 @@ def _table(rows: list[list[str]], header: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _state(args) -> DraftState:
-    return load_state(args.players, args.league, args.picks)
+_PLAYERS_CACHE: dict = {}
+
+
+def _state(args, cached: bool = False) -> DraftState:
+    """Load the draft state. With cached=True the players list (possibly a
+    Google Sheet download) is fetched once and reused on later calls."""
+    if not cached:
+        return load_state(args.players, args.league, args.picks)
+    key = (args.players, args.league)
+    if key not in _PLAYERS_CACHE:
+        _PLAYERS_CACHE[key] = load_state(args.players, args.league, None).players
+    return load_state(args.players, args.league, args.picks, players=_PLAYERS_CACHE[key])
 
 
 def _status(state: DraftState) -> str:
@@ -182,7 +192,7 @@ def cmd_draft(args) -> None:
     show_recs = True
     while True:
         try:
-            state = _state(args)
+            state = _state(args, cached=True)
             entries = load_log(args.picks, state.players, state.league)
         except Exception as e:
             print(f"error reading files: {e}")
@@ -289,8 +299,9 @@ def cmd_watch(args) -> None:
                      Path(args.league).stat().st_mtime)
             if mtime != last:
                 last = mtime
+                state = _state(args, cached=True)
                 os.system("cls" if os.name == "nt" else "clear")
-                _print_recommendations(_state(args), args)
+                _print_recommendations(state, args)
         except Exception as e:  # keep watching through half-written files
             print(f"error: {e}", file=sys.stderr)
             last = None

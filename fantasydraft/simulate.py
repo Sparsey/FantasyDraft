@@ -5,7 +5,7 @@ import random
 from dataclasses import dataclass
 from typing import Iterator
 
-from .drafters import CANDIDATE_POOL, choose_pick, order_for
+from .drafters import CANDIDATE_POOL, base_key, choose_pick, order_for
 from .lineup import roster_value
 from .models import POSITIONS, DraftState, Player
 
@@ -29,6 +29,7 @@ class Simulator:
         strategies = {t.strategy for t in self.league.teams} | {"points", "auto"}
         players = list(state.players.values())
         self.orders = {s: order_for(s, players) for s in strategies}
+        self.keys = {s: [base_key(s, p) for p in order] for s, order in self.orders.items()}
 
     def _untaken(self, strategy: str, taken: set[str]) -> Iterator[Player]:
         return (p for p in self.orders[strategy] if p.id not in taken)
@@ -40,6 +41,27 @@ class Simulator:
             if len(out) == n:
                 break
         return out
+
+    def _pool(self, strategy: str, taken: set[str], starts: dict[str, int]) -> tuple[list[Player], list[float]]:
+        """First CANDIDATE_POOL untaken players (and their keys) for a strategy.
+
+        `starts` remembers, per simulation run, where the untaken players
+        begin, so already-drafted players at the top aren't rescanned.
+        """
+        order, keys = self.orders[strategy], self.keys[strategy]
+        i = starts.get(strategy, 0)
+        while i < len(order) and order[i].id in taken:
+            i += 1
+        starts[strategy] = i
+        pool: list[Player] = []
+        pool_keys: list[float] = []
+        while i < len(order) and len(pool) < CANDIDATE_POOL:
+            p = order[i]
+            if p.id not in taken:
+                pool.append(p)
+                pool_keys.append(keys[i])
+            i += 1
+        return pool, pool_keys
 
     def my_greedy_pick(self, roster: list[Player], taken: set[str]) -> Player:
         """Take the player who most increases my roster value right now."""
@@ -71,6 +93,7 @@ class Simulator:
         taken = set(self.state.picks)
         my_roster = self.state.rosters()[league.my_slot]
         taken_at: dict[str, int] = {}
+        starts: dict[str, int] = {}
         forced = my_next
 
         for pick in range(self.state.current_pick, league.total_picks):
@@ -86,8 +109,8 @@ class Simulator:
                 my_roster.append(choice)
             else:
                 profile = self.state.profile(team)
-                ordered = self.top_untaken(profile.strategy, taken, CANDIDATE_POOL)
-                choice = choose_pick(profile, ordered, rng, pick)
+                pool, keys = self._pool(profile.strategy, taken, starts)
+                choice = choose_pick(profile, pool, rng, pick, keys)
                 taken_at[choice.id] = pick
             taken.add(choice.id)
 

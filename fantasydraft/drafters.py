@@ -37,11 +37,13 @@ def choose_pick(
     ordered: Sequence[Player],
     rng: random.Random,
     pick: int = 0,
+    keys: Sequence[float] | None = None,
 ) -> Player:
     """Pick the player `profile` takes at overall `pick` (0-based).
 
     `ordered` must be the available players sorted by `base_key(profile.strategy)`
-    (at least the first CANDIDATE_POOL of them).
+    (at least the first CANDIDATE_POOL of them). `keys` optionally holds those
+    base keys, precomputed, to save recomputing them on every simulated pick.
     """
     if not ordered:
         raise ValueError("no players available")
@@ -56,8 +58,10 @@ def choose_pick(
             # behave on the same scale as for rank-based strategies.
             key = pick + i + 1.0
         else:
-            key = base_key(profile.strategy, p)
-        key = max(key - profile.favorites.get(p.name, 0.0), 0.1)
+            key = keys[i] if keys is not None else base_key(profile.strategy, p)
+        if profile.favorites:
+            key -= profile.favorites.get(p.name, 0.0)
+        key = max(key, 0.1)
         if profile.noise:
             key *= math.exp(rng.gauss(0.0, profile.noise))
         if key < best_key:

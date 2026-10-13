@@ -325,8 +325,11 @@ def players_source(league_path: str | Path) -> str:
     return cfg.get("players", "data/players.csv")
 
 
-def load_state(players_path: str | Path | None, league_path: str | Path, picks_path: str | Path | None) -> DraftState:
-    players = load_players(players_path or players_source(league_path))
+def load_state(players_path: str | Path | None, league_path: str | Path, picks_path: str | Path | None,
+               players: dict[str, Player] | None = None) -> DraftState:
+    """Players (unless already loaded and passed in), league and picks -> DraftState."""
+    if players is None:
+        players = load_players(players_path or players_source(league_path))
     league = load_league(league_path)
     state = DraftState(league=league, players=players)
     if picks_path:
