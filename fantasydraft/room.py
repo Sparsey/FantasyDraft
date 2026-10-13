@@ -96,6 +96,12 @@ class RoomTracker:
         if not self.blocked:
             self.log(f"!! Lost track of the draft ({why}). Holding new picks until it resyncs "
                      "from the page. Open the draft room's Pick History so it can be read.")
+            n = self.league.num_teams
+            if len(self.picks) < 2 * n:
+                # Early in the draft, the usual cause is the snake turning at the wrong place.
+                self.log(f"!! This early, the likely cause is the team count: your league file has {n} teams. "
+                         "If the draft has a different number, recreate the file "
+                         "(new-league --teams N --my-pick P --force), then restart room.")
         self.blocked = why
 
     # --- feed ------------------------------------------------------------------

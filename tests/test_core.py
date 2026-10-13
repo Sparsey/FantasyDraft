@@ -328,3 +328,19 @@ ON THE CLOCK: PICK 4
     assert not tracker.blocked
     assert tracker.picks == ["Bam Adebayo", "Stephen Curry", "Jalen Duren"]
     assert tracker.slot_names == {0: "Tarheels", 1: "JUSTICE FOR NOLAN"}
+
+
+def test_room_tracker_flags_wrong_team_count(tmp_path):
+    from fantasydraft.room import RoomTracker
+
+    # League file says 10 teams, but the real draft has 8 (ids 1-8 in order).
+    league = _mock1_league()
+    lines = []
+    tracker = RoomTracker(league, load_players(SAMPLE), tmp_path / "picks.txt", log=lines.append)
+    order = list(range(1, 9)) + list(range(8, 0, -1))
+    for i, team in enumerate(order):
+        tracker.handle_message(f"SELECTING {team} 60000")
+        tracker.handle_message(f"SELECTED {team} p{i} 1 member")
+    assert tracker.blocked
+    assert len(tracker.picks) == 8  # stopped at the first pick of round 2
+    assert any("team count" in line for line in lines)
