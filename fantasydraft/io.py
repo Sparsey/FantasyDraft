@@ -134,6 +134,14 @@ def load_league(path: str | Path) -> League:
     )
 
 
+def player_by_rank(rank: int, players: dict[str, Player]) -> str | None:
+    """Player id with this ESPN rank (as listed in the players sheet), if any."""
+    matches = [pid for pid, p in players.items() if p.espn_rank == rank]
+    if len(matches) > 1:
+        raise ValueError(f"ESPN rank {rank} is shared by {[players[m].name for m in matches]}")
+    return matches[0] if matches else None
+
+
 def resolve_player(token: str, players: dict[str, Player]) -> str:
     """Match a pick entry (id, exact name, or unique name prefix) to a player id."""
     token = token.strip()

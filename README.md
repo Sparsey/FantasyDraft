@@ -59,6 +59,7 @@ python -m fantasydraft watch --league examples/league.json
 | command | what it does |
 |---|---|
 | `draft` | interactive tracker: type picks and `auto`/`back` switches, recommendations after each |
+| `capture` | record the ESPN draft page's live feed via a browser userscript ([browser/README.md](browser/README.md)) |
 | `new-league` | create a league file (e.g. `mock.json` for an ESPN mock) |
 | `recommend` | rank options for my next pick (one-shot) |
 | `watch` | re-run `recommend` whenever `picks.txt` or `league.json` changes |

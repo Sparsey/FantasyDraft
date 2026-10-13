@@ -8,3 +8,5 @@ __pycache__/
 /picks.txt
 /data/players.csv
 espn_dump*.json
+/capture*.jsonl
+/capture_summary*.txt

@@ -238,3 +238,20 @@ def test_analyze_skips_autodraft_picks():
     t = analyze(state)
     assert (t[1].picks, t[1].auto_picks) == (0, 2)
     assert (t[0].picks, t[0].auto_picks) == (2, 0)
+
+
+def test_player_by_rank():
+    from fantasydraft.io import player_by_rank
+
+    players = load_players(SAMPLE)
+    pid = player_by_rank(1, players)
+    assert players[pid].espn_rank == 1
+    assert player_by_rank(99999, players) is None
+
+
+def test_capture_redaction():
+    from fantasydraft.capture import redact
+
+    out = redact('{"token":"abc","x":1} SWID={ABCDEF} ' + "a" * 40)
+    assert "abc" not in out and "ABCDEF" not in out and "a" * 40 not in out
+    assert "SELECTED 3 4065648" == redact("SELECTED 3 4065648")

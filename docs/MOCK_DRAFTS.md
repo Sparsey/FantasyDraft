@@ -31,8 +31,11 @@ the file.
 python -m fantasydraft draft --league mock.json --picks picks.txt
 ```
 
-Type each pick as it happens: a name, or the start of one (`jok` for Jokić
-if unique), records the next pick. Recommendations refresh after every entry.
+Type each pick as it happens. The quickest is the player's **ESPN rank**
+(e.g. `17`), but a name or the start of one (`jok` for Jokić, if unique)
+works too. The confirmation shows the player's name; type `undo` if it's
+wrong. Ranks come from your sheet, so update the sheet right before the
+draft to match what the draft room shows. Recommendations refresh after every entry.
 
 When someone switches autodraft on or off:
 
@@ -52,6 +55,9 @@ as you go, so you can quit and resume.
 
 Mock pick clocks are short. If recommendations lag, lower `--sims`
 (default 60; try 30).
+
+**Help automate this:** while you do a mock, you can also record the
+draft page's live feed. See [browser/README.md](../browser/README.md).
 
 ## 2. Analyse the finished mock
 

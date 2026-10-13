@@ -23,7 +23,7 @@ from pathlib import Path
 
 from .analyze import analyze
 from .drafters import CANDIDATE_POOL, choose_pick
-from .io import load_log, load_picks, load_state, resolve_player, resolve_team, save_log, save_picks, save_players
+from .io import load_log, load_picks, load_state, player_by_rank, resolve_player, resolve_team, save_log, save_picks, save_players
 from .models import DraftState
 from .recommend import recommend
 from .simulate import Simulator, availability
@@ -143,7 +143,8 @@ def cmd_analyze(args) -> None:
     print("Picks made while a team was marked @auto are left out of its stats.")
 
 
-DRAFT_HELP = """Type a player (name, start of a name, or id) to record the next pick.
+DRAFT_HELP = """Record the next pick by typing the player's ESPN rank (e.g. 17),
+or a name / start of a name, or id:<espn id>.
   auto <team>   team went on autodraft     (team = name, start of name, or draft position)
   back <team>   team is drafting themselves again (their saved strategy is used)
   undo          remove the last entry
@@ -217,13 +218,24 @@ def cmd_draft(args) -> None:
             else:
                 if state.is_complete:
                     raise ValueError("the draft is already complete")
-                pid = resolve_player(line, state.players)
+                if line.isdigit():
+                    pid = player_by_rank(int(line), state.players)
+                    if pid is None:
+                        raise ValueError(f"no player with ESPN rank {line} in your players list")
+                elif line.lower().startswith("id:"):
+                    pid = line[3:].strip()
+                    if pid not in state.players:
+                        raise ValueError(f"no player with id {pid}")
+                else:
+                    pid = resolve_player(line, state.players)
                 if pid in state.picks:
                     raise ValueError(f"{state.players[pid].name} is already drafted")
                 team = state.league.teams[state.league.team_for_pick(state.current_pick)].name
                 entries.append(("pick", pid))
                 save_log(entries, state.players, state.league, args.picks)
-                message = f"#{state.current_pick + 1} {team}: {state.players[pid].name}"
+                p = state.players[pid]
+                rank = f" (ESPN rank {p.espn_rank:g})" if p.espn_rank != float("inf") else ""
+                message = f"#{state.current_pick + 1} {team}: {p.name}{rank}   — wrong? type undo"
         except ValueError as e:
             message = f"!! {e}"
 
@@ -385,6 +397,18 @@ def cmd_live(args) -> None:
         time.sleep(args.interval)
 
 
+def cmd_capture(args) -> None:
+    from .capture import serve, summarize
+
+    if args.summary:
+        text = summarize(args.out)
+        Path(args.summary).write_text(text, encoding="utf-8")
+        print(text[:4000])
+        print(f"\n(full summary written to {args.summary})")
+    else:
+        serve(args.out, args.port)
+
+
 def _league_id(text: str) -> int:
     """Accept a bare id or any ESPN URL containing leagueId=..."""
     import re
@@ -482,6 +506,13 @@ def main(argv: list[str] | None = None) -> None:
     espn(p)
     p.add_argument("--out", default="league.json")
     p.set_defaults(func=cmd_fetch_league)
+
+    p = sub.add_parser("capture", help="record ESPN draft-room traffic sent by the browser userscript")
+    p.add_argument("--out", default="capture.jsonl")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--summary", metavar="FILE",
+                   help="don't capture; write a redacted, shareable summary of --out to FILE")
+    p.set_defaults(func=cmd_capture)
 
     p = sub.add_parser("live", help="mirror the live ESPN draft into the picks file")
     espn(p)
