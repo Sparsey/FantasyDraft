@@ -29,6 +29,19 @@ from .recommend import recommend
 from .simulate import Simulator, availability
 
 
+def _pct(p: float) -> str:
+    """Percent for a simulated chance: <1% / >99% unless it never/always happened."""
+    if p <= 0:
+        return "0%"
+    if p >= 1:
+        return "100%"
+    if p < 0.01:
+        return "<1%"
+    if p > 0.99:
+        return ">99%"
+    return f"{p:.0%}"
+
+
 def _table(rows: list[list[str]], header: list[str]) -> str:
     widths = [max(len(str(x)) for x in col) for col in zip(header, *rows)]
     fmt = "  ".join(f"{{:<{w}}}" for w in widths)
@@ -77,8 +90,8 @@ def _print_recommendations(state: DraftState, args) -> None:
             "/".join(sorted(r.player.positions)),
             f"{r.player.proj_points:.0f}",
             f"{r.marginal_now:+.0f}",
-            f"{r.p_avail_now:.0%}",
-            f"{r.p_avail_after:.0%}",
+            _pct(r.p_avail_now),
+            _pct(r.p_avail_after),
             f"{r.exp_final_value:.0f}",
             f"{r.exp_final_value - best:+.0f}",
         ]
@@ -101,7 +114,7 @@ def cmd_availability(args) -> None:
     top = sorted(state.available(), key=lambda p: p.proj_points, reverse=True)[: args.top]
     rows = [
         [p.name, "/".join(sorted(p.positions)), f"{p.proj_points:.0f}",
-         *(f"{x:.0%}" for x in probs[p.id][:3])]
+         *(_pct(x) for x in probs[p.id][:3])]
         for p in top
     ]
     print()

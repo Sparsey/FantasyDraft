@@ -344,3 +344,19 @@ def test_room_tracker_flags_wrong_team_count(tmp_path):
     assert tracker.blocked
     assert len(tracker.picks) == 8  # stopped at the first pick of round 2
     assert any("team count" in line for line in lines)
+
+
+def test_percent_display():
+    from fantasydraft.cli import _pct
+
+    assert [_pct(x) for x in (0, 0.004, 0.012, 0.5, 0.995, 1)] == ["0%", "<1%", "1%", "50%", ">99%", "100%"]
+
+
+def test_recommend_skips_players_who_never_last():
+    # Pick 2 of a 2-team draft, not on the clock: the auto opponent takes pg1
+    # first, so pg1 can never be mine and shouldn't be recommended.
+    state = _tiny_state(["auto", "auto"], my=1)
+    state.picks = []
+    recs = recommend(state, candidates=4, sims=5)
+    assert recs and all(r.p_avail_now > 0 for r in recs)
+    assert "pg1" not in [r.player.name for r in recs]

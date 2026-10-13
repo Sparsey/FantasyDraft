@@ -185,7 +185,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
-const pct = (x) => x == null ? "–" : Math.round(x * 100) + "%";
+const pct = (x) => x == null ? "–" : x <= 0 ? "0%" : x >= 1 ? "100%" : x < 0.01 ? "<1%" : x > 0.99 ? ">99%" : Math.round(x * 100) + "%";
 let S = null, players = [], playersVersion = -1, tab = "recs", clockAt = 0, sel = 0;
 
 function bar(p) {

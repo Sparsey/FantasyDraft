@@ -19,13 +19,14 @@ class Recommendation:
     exp_final_value: float  # mean final roster value if I take them (or best fallback if gone)
 
 
-def candidate_pool(state: DraftState, k: int) -> list[Player]:
+def candidate_pool(state: DraftState, k: int, exclude: set[str] = frozenset()) -> list[Player]:
     """Top players by immediate roster gain, plus the best player at each position."""
     league = state.league
     slots = league.starting_slots
     roster = state.rosters()[league.my_slot]
     base = roster_value(roster, slots, league.bench_weight)
-    avail = sorted(state.available(), key=lambda p: p.proj_points, reverse=True)[: k * 4]
+    avail = sorted((p for p in state.available() if p.id not in exclude),
+                   key=lambda p: p.proj_points, reverse=True)[: k * 4]
     gains = {p.id: roster_value(roster + [p], slots, league.bench_weight) - base for p in avail}
     by_gain = sorted(avail, key=lambda p: (gains[p.id], p.proj_points), reverse=True)
 
@@ -61,10 +62,14 @@ def recommend(
     my_picks = state.my_next_picks()
     on_clock = my_picks[0] == state.current_pick
 
-    avail = availability(state, sims=sims, seed=seed + 1)
+    # Availability is cheap next to candidate evaluation; use enough runs that
+    # "<1%" means something.
+    avail = availability(state, sims=max(sims * 3, 200), seed=seed + 1)
+    # Players who never last to my next pick aren't real options.
+    gone = set() if on_clock else {pid for pid, pr in avail.items() if pr and pr[0] == 0}
     sim = Simulator(state)
     out: list[Recommendation] = []
-    for p in candidate_pool(state, candidates):
+    for p in candidate_pool(state, candidates, exclude=gone):
         values = [sim.run(random.Random(seed * 1_000_003 + i), my_next=p).my_value for i in range(sims)]
         probs = avail.get(p.id, [])
         out.append(
