@@ -111,18 +111,22 @@ class EspnClient:
 
     # --- players -------------------------------------------------------------
 
-    def players_raw(self, limit: int = 400, rank_type: str = "STANDARD") -> list[dict]:
+    def players_raw(self, limit: int = 400, rank_type: str = "STANDARD", defaults: bool = False) -> list[dict]:
+        """Players with projections scored by this league's settings, or by
+        ESPN's default league if `defaults` (works before a league is activated)."""
         flt = {
             "players": {
                 "limit": limit,
                 "sortDraftRanks": {"sortPriority": 100, "sortAsc": True, "value": rank_type},
             }
         }
-        data = self._get(self._league_path, ["kona_player_info"], flt)
+        path = "/segments/0/leaguedefaults/1" if defaults else self._league_path
+        data = self._get(path, ["kona_player_info"], flt)
         return data.get("players", [])
 
-    def players(self, limit: int = 400, rank_type: str = "STANDARD") -> list[Player]:
-        return [p for raw in self.players_raw(limit, rank_type) if (p := parse_player(raw, self.season, rank_type))]
+    def players(self, limit: int = 400, rank_type: str = "STANDARD", defaults: bool = False) -> list[Player]:
+        raw = self.players_raw(limit, rank_type, defaults)
+        return [p for r in raw if (p := parse_player(r, self.season, rank_type))]
 
 
 def parse_player(raw: dict, season: int, rank_type: str = "STANDARD") -> Player | None:

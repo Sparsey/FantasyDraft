@@ -21,6 +21,23 @@ players from ESPN**, and the draft program reads it straight from the share link
    in the sheet, so your ESPN login stays private even though the sheet is public.
 5. **Draft Tools → Update players from ESPN.**
 
+## Before your league is activated
+
+Until the league is renewed for the new season, ESPN has no league to read,
+so an update falls back to **ESPN's default league**. That still gives you
+ranks, ADP, positions and projections, but the projections use ESPN's
+default scoring rather than yours. A pop-up tells you when this happens,
+and the note on the `id` header cell records which scoring the current
+numbers use.
+
+Once the league is activated (and your cookies are set, since it's
+private), click **Update** again. Rows are matched by id, so the projections
+are simply overwritten with your league's scoring, and your own columns
+stay as they are.
+
+You can enter the league id, season and cookies now. Use the same league id
+as last season, because ESPN keeps it when a league is renewed.
+
 ## The players tab
 
 The script uses the tab named `players`, or the first tab if there isn't one.

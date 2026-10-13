@@ -159,14 +159,28 @@ def cmd_mock(args) -> None:
 
 
 def cmd_fetch_players(args) -> None:
-    from .espn import EspnClient
+    import urllib.error
+
+    from .espn import EspnClient, parse_player
 
     client = EspnClient(args.league_id, args.season, args.espn_s2, args.swid)
+    defaults = args.defaults
+    try:
+        raw = client.players_raw(args.limit, args.rank_type, defaults)
+    except urllib.error.HTTPError as e:
+        if defaults:
+            raise
+        print(f"warning: league {args.league_id} not readable for {args.season} (HTTP {e.code}) — "
+              "not activated yet, or missing/expired cookies. Falling back to ESPN default-league "
+              "projections; re-run once the league works.", file=sys.stderr)
+        defaults = True
+        raw = client.players_raw(args.limit, args.rank_type, defaults)
     if args.dump:
-        Path(args.dump).write_text(json.dumps(client.players_raw(args.limit, args.rank_type), indent=1))
-    players = client.players(args.limit, args.rank_type)
+        Path(args.dump).write_text(json.dumps(raw, indent=1))
+    players = [p for r in raw if (p := parse_player(r, args.season, args.rank_type))]
     save_players(players, args.out)
-    print(f"wrote {len(players)} players to {args.out}")
+    source = "ESPN default scoring" if defaults else f"league {args.league_id} scoring"
+    print(f"wrote {len(players)} players to {args.out} (projections: {source})")
 
 
 def cmd_fetch_league(args) -> None:
@@ -275,6 +289,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--out", default="data/players.csv")
     p.add_argument("--limit", type=int, default=400)
     p.add_argument("--rank-type", default="STANDARD", help="ESPN draft rank list (STANDARD, POINTS, ...)")
+    p.add_argument("--defaults", action="store_true",
+                   help="use ESPN's default league (before your league is activated)")
     p.set_defaults(func=cmd_fetch_players)
 
     p = sub.add_parser("fetch-league", help="create/refresh league.json from ESPN settings")

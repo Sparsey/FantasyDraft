@@ -11,6 +11,10 @@
  *   - never touches any other column (my_proj, ignore, notes, formulas, ...)
  *   - never deletes or reorders rows
  *
+ * Before your league is activated for the new season, the update falls back
+ * to ESPN's default league (ranks, ADP, default-scoring projections) and says
+ * so; run it again after activation to get your league's scoring.
+ *
  * League id / season / cookies are stored in *your* Apps Script user
  * properties, not in the sheet, so they stay private even though the sheet
  * is shared publicly.
@@ -74,21 +78,48 @@ function configure() {
   ui.alert('Saved. Run Draft Tools → Update players from ESPN when you are ready.');
 }
 
-function fetchEspnPlayers_(s) {
-  var url = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/' + s.season +
-            '/segments/0/leagues/' + s.leagueId + '?view=kona_player_info';
+function espnGet_(path, s, useCookies) {
+  var url = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/' + s.season + path +
+            '?view=kona_player_info';
   var filter = {players: {limit: s.limit,
                           sortDraftRanks: {sortPriority: 100, sortAsc: true, value: s.rankType}}};
   var headers = {'X-Fantasy-Filter': JSON.stringify(filter), 'Accept': 'application/json'};
-  if (s.espnS2 && s.swid) headers['Cookie'] = 'espn_s2=' + s.espnS2 + '; SWID=' + s.swid;
-  var resp = UrlFetchApp.fetch(url, {headers: headers, muteHttpExceptions: true});
+  if (useCookies && s.espnS2 && s.swid) headers['Cookie'] = 'espn_s2=' + s.espnS2 + '; SWID=' + s.swid;
+  return UrlFetchApp.fetch(url, {headers: headers, muteHttpExceptions: true});
+}
+
+/**
+ * Players with projections scored by your league's settings. If the league
+ * can't be read for this season (not activated/renewed yet, or bad cookies),
+ * falls back to ESPN's default league so you still get ranks, ADP and
+ * default-scoring projections. Returns {players, source, warning}.
+ */
+function fetchEspnPlayers_(s) {
+  var resp = espnGet_('/segments/0/leagues/' + s.leagueId, s, true);
   var code = resp.getResponseCode();
-  if (code === 401 || code === 403) {
-    throw new Error('ESPN refused access (' + code + '). Private league? Set espn_s2 and SWID in Settings ' +
-                    '(they expire — copy fresh ones from your browser if this worked before).');
+  if (code === 200) {
+    return {players: JSON.parse(resp.getContentText()).players || [], source: 'league ' + s.leagueId, warning: ''};
   }
-  if (code !== 200) throw new Error('ESPN returned HTTP ' + code + ': ' + resp.getContentText().slice(0, 300));
-  return JSON.parse(resp.getContentText()).players || [];
+  var why;
+  if (code === 401 || code === 403) {
+    why = s.espnS2 && s.swid
+      ? 'ESPN refused access (' + code + '). The league may not be activated for ' + s.season +
+        ' yet, or your espn_s2/SWID cookies have expired (copy fresh ones into Settings).'
+      : 'ESPN refused access (' + code + '). Private league: set espn_s2 and SWID in Settings.';
+  } else if (code === 404) {
+    why = 'League ' + s.leagueId + ' not found for season ' + s.season + ' (not activated/renewed yet?).';
+  } else {
+    why = 'League request failed with HTTP ' + code + '.';
+  }
+  var fallback = espnGet_('/segments/0/leaguedefaults/1', s, false);
+  if (fallback.getResponseCode() !== 200) {
+    throw new Error(why + ' The ESPN default-league fallback also failed (HTTP ' + fallback.getResponseCode() + ').');
+  }
+  return {
+    players: JSON.parse(fallback.getContentText()).players || [],
+    source: 'ESPN default scoring',
+    warning: why + ' Using ESPN default-league projections for now; run Update again once your league works.'
+  };
 }
 
 function parsePlayer_(raw, season, rankType) {
@@ -129,7 +160,8 @@ function updatePlayers() {
     SpreadsheetApp.getUi().alert('Set your league id and season first: Draft Tools → Settings.');
     return;
   }
-  var players = fetchEspnPlayers_(s)
+  var fetched = fetchEspnPlayers_(s);
+  var players = fetched.players
     .map(function (raw) { return parsePlayer_(raw, s.season, s.rankType); })
     .filter(function (p) { return p; });
 
@@ -185,6 +217,13 @@ function updatePlayers() {
     });
   }
   var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
-  sheet.getRange(1, col.id + 1).setNote('Last ESPN update: ' + stamp + ' (' + s.rankType + ' ranks, season ' + s.season + ')');
-  SpreadsheetApp.getActiveSpreadsheet().toast(updated + ' players updated, ' + added + ' added.', 'ESPN update', 8);
+  sheet.getRange(1, col.id + 1).setNote('Last ESPN update: ' + stamp + '\nProjections: ' + fetched.source +
+                                        '\nRanks: ' + s.rankType + ', season ' + s.season +
+                                        (fetched.warning ? '\n\n' + fetched.warning : ''));
+  var summary = updated + ' players updated, ' + added + ' added (projections: ' + fetched.source + ').';
+  if (fetched.warning) {
+    SpreadsheetApp.getUi().alert(summary + '\n\n' + fetched.warning);
+  } else {
+    SpreadsheetApp.getActiveSpreadsheet().toast(summary, 'ESPN update', 8);
+  }
 }
