@@ -174,3 +174,10 @@ def test_my_proj_and_ignore_columns(tmp_path):
     assert set(players) == {"1", "2"}
     assert players["1"].proj_points == 1500.5
     assert players["2"].proj_points == 1600
+
+
+def test_league_id_accepts_url():
+    from fantasydraft.cli import _league_id
+
+    assert _league_id("358709800") == 358709800
+    assert _league_id("https://fantasy.espn.com/basketball/team?leagueId=358709800&seasonId=2027&teamId=4") == 358709800

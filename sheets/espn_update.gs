@@ -43,13 +43,27 @@ function onOpen() {
     .addToUi();
 }
 
+/** Accepts a bare league id or any ESPN league URL ("...leagueId=358709800&seasonId=2027..."). */
+function parseLeagueId_(text) {
+  text = String(text || '').trim();
+  var m = text.match(/leagueId=(\d+)/i);
+  if (m) return m[1];
+  return /^\d+$/.test(text) ? text : '';
+}
+
+function parseSeason_(text) {
+  var m = String(text || '').match(/seasonId=(\d{4})/i) || String(text || '').match(/^\s*(\d{4})\s*$/);
+  return m ? m[1] : '';
+}
+
 function getSettings_() {
   var p = PropertiesService.getUserProperties().getProperties();
   return {
-    leagueId: p.leagueId || '',
-    season: p.season || '',
-    espnS2: p.espnS2 || '',
-    swid: p.swid || '',
+    leagueId: parseLeagueId_(p.leagueId),
+    // A pasted league URL also carries the season.
+    season: parseSeason_(p.season) || parseSeason_(p.leagueId),
+    espnS2: (p.espnS2 || '').trim(),
+    swid: (p.swid || '').trim(),
     rankType: p.rankType || 'STANDARD',
     limit: Number(p.limit || 400)
   };
@@ -59,7 +73,7 @@ function configure() {
   var ui = SpreadsheetApp.getUi();
   var s = getSettings_();
   var fields = [
-    ['leagueId', 'ESPN league id (the number after leagueId= in your league URL)', s.leagueId],
+    ['leagueId', 'ESPN league id — the number after leagueId= in your league URL (pasting the whole URL works too)', s.leagueId],
     ['season', 'Season year — the year the season ENDS (2026-27 season = 2027)', s.season],
     ['espnS2', 'espn_s2 cookie — private leagues only, leave blank if public', s.espnS2 ? '(saved)' : ''],
     ['swid', 'SWID cookie, including { } — private leagues only', s.swid ? '(saved)' : ''],
@@ -73,7 +87,20 @@ function configure() {
                       '\n\nLeave blank to keep the current value.', ui.ButtonSet.OK_CANCEL);
     if (r.getSelectedButton() !== ui.Button.OK) return;
     var v = r.getResponseText().trim();
-    if (v) props.setProperty(key, v);
+    if (!v) continue;
+    if (key === 'leagueId') {
+      if (!parseLeagueId_(v)) {
+        ui.alert('"' + v + '" is not a league id. It should be a number like 358709800, or your league URL.');
+        return;
+      }
+      if (parseSeason_(v)) props.setProperty('season', parseSeason_(v));
+      v = parseLeagueId_(v);
+    }
+    if (key === 'season' && !parseSeason_(v)) {
+      ui.alert('"' + v + '" is not a season. Use the 4-digit year the season ends, e.g. 2027.');
+      return;
+    }
+    props.setProperty(key, v);
   }
   ui.alert('Saved. Run Draft Tools → Update players from ESPN when you are ready.');
 }
@@ -155,9 +182,18 @@ function playersSheet_() {
 }
 
 function updatePlayers() {
+  try {
+    updatePlayers_();
+  } catch (e) {
+    SpreadsheetApp.getUi().alert('ESPN update failed:\n\n' + (e && e.message ? e.message : e));
+  }
+}
+
+function updatePlayers_() {
   var s = getSettings_();
   if (!s.leagueId || !s.season) {
-    SpreadsheetApp.getUi().alert('Set your league id and season first: Draft Tools → Settings.');
+    SpreadsheetApp.getUi().alert('League id or season missing/invalid (league id: "' + s.leagueId +
+                                 '", season: "' + s.season + '"). Fix them in Draft Tools → Settings.');
     return;
   }
   var fetched = fetchEspnPlayers_(s);

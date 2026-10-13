@@ -234,6 +234,16 @@ def cmd_live(args) -> None:
         time.sleep(args.interval)
 
 
+def _league_id(text: str) -> int:
+    """Accept a bare id or any ESPN URL containing leagueId=..."""
+    import re
+
+    m = re.search(r"leagueId=(\d+)", text) or re.fullmatch(r"\s*(\d+)\s*", text)
+    if not m:
+        raise argparse.ArgumentTypeError(f"not a league id or league URL: {text!r}")
+    return int(m.group(1))
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="fantasydraft", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -252,7 +262,8 @@ def main(argv: list[str] | None = None) -> None:
         p.add_argument("--candidates", type=int, default=8)
 
     def espn(p):
-        p.add_argument("--league-id", type=int, required=True)
+        p.add_argument("--league-id", type=_league_id, required=True,
+                       help="ESPN league id, or your league URL")
         p.add_argument("--season", type=int, required=True, help="e.g. 2027 for the 2026-27 season")
         p.add_argument("--espn-s2", default=os.environ.get("ESPN_S2"))
         p.add_argument("--swid", default=os.environ.get("ESPN_SWID"))
