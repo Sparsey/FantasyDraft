@@ -1,0 +1,87 @@
+# FantasyDraft
+
+Draft assistant for an ESPN fantasy basketball (points) league. It tracks a
+snake draft, models how each opponent drafts, and uses Monte Carlo
+simulation of the rest of the draft to recommend picks.
+
+Pure Python 3.10+ standard library; `pytest` is only needed for tests.
+See [docs/PLAN.md](docs/PLAN.md) for the roadmap and design notes.
+
+## Quick start (sample data)
+
+```bash
+# rehearse: fake draft writes picks.txt while `watch` updates recommendations
+python -m fantasydraft mock  --players data/sample_players.csv --league examples/league.json --delay 3 &
+python -m fantasydraft watch --players data/sample_players.csv --league examples/league.json
+```
+
+`data/sample_players.csv` is synthetic (`examples/make_sample_players.py`).
+
+## Real draft
+
+1. **Players** — download ESPN ranks, ADP and projected points (scored with
+   your league's settings):
+   ```bash
+   export ESPN_S2=... ESPN_SWID='{...}'   # private leagues: cookies from espn.com
+   python -m fantasydraft fetch-players --league-id 12345 --season 2027
+   ```
+   Edit `data/players.csv` freely (e.g. in Google Sheets) — only the columns
+   matter.
+2. **League** — `python -m fantasydraft fetch-league --league-id 12345 --season 2027`
+   writes `league.json` with draft order and roster slots. Then set
+   `my_team` and each team's profile:
+
+   | field | meaning |
+   |---|---|
+   | `strategy` | `auto` (ESPN autodraft: best ESPN rank, deterministic), `adp` (drafts around ADP), `rank` (follows ESPN's board), `points` (drafts by projections) |
+   | `noise` | how unpredictable they are (0.15 ≈ ±15% of draft slot) |
+   | `favorites` | `{"Player Name": 10}` → takes that player ~10 spots early |
+   | `bench_weight` | how much bench points count vs starters (league-wide) |
+
+3. **Draft day** — in two terminals:
+   ```bash
+   python -m fantasydraft live  --league-id 12345 --season 2027   # ESPN -> picks.txt
+   python -m fantasydraft watch                                   # picks.txt -> recommendations
+   ```
+   If the ESPN feed breaks, type picks into `picks.txt` yourself (one name or
+   id per line, unique name prefixes are fine) — `watch` doesn't care where
+   they come from.
+
+## Commands
+
+| command | what it does |
+|---|---|
+| `recommend` | rank options for my next pick (one-shot) |
+| `watch` | re-run `recommend` whenever `picks.txt` or `league.json` changes |
+| `availability` | P(each top player survives to my next 3 picks) |
+| `analyze` | opponents' tendencies so far (autodraft? reaching? by points?) |
+| `mock` | simulate a draft into `picks.txt` (prompts you on your turns unless `--auto-me`) |
+| `fetch-players`, `fetch-league`, `live` | ESPN integration |
+
+### Reading `recommend`
+
+- **gain now** — how much your best lineup improves immediately.
+- **avail@my pick / avail@pick after** — chance opponents leave the player
+  for your next pick / the one after (if you pass on them).
+- **E[final team]** — average projected value of your final roster over
+  simulations where you take this player at your next pick (falling back to
+  your default pick if they're gone). This is the number to sort by: it
+  accounts for scarcity, what will still be there later, and opponents'
+  tendencies.
+
+## How it works
+
+- `lineup.py` — optimal starters via matroid greedy + bipartite matching
+  across PG/SG/SF/PF/C/G/F/UTIL slots.
+- `drafters.py` — opponent pick models (strategy + noise + favorites).
+- `simulate.py` — plays out the rest of the draft; availability odds.
+- `recommend.py` — evaluates candidates on common random seeds.
+- `analyze.py` — infers opponent strategies from actual picks.
+- `espn.py` — ESPN's unofficial `lm-api-reads.fantasy.espn.com` API
+  (untested against a live league so far).
+
+## Tests
+
+```bash
+pip install pytest && python -m pytest
+```

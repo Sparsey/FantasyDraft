@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+# per-draft working files (may contain league data)
+/league.json
+/picks.txt
+/data/players.csv
+espn_dump*.json

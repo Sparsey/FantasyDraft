@@ -1,0 +1,141 @@
+"""Core data types: players, league settings, opponent profiles and draft state."""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+POSITIONS = ("PG", "SG", "SF", "PF", "C")
+
+# Which player positions may fill each lineup slot (ESPN basketball defaults).
+SLOT_ELIGIBILITY: dict[str, frozenset[str]] = {
+    "PG": frozenset({"PG"}),
+    "SG": frozenset({"SG"}),
+    "SF": frozenset({"SF"}),
+    "PF": frozenset({"PF"}),
+    "C": frozenset({"C"}),
+    "G": frozenset({"PG", "SG"}),
+    "F": frozenset({"SF", "PF"}),
+    "SG/SF": frozenset({"SG", "SF"}),
+    "G/F": frozenset({"PG", "SG", "SF", "PF"}),
+    "PF/C": frozenset({"PF", "C"}),
+    "F/C": frozenset({"SF", "PF", "C"}),
+    "UTIL": frozenset(POSITIONS),
+}
+BENCH = "BE"
+
+DEFAULT_ROSTER_SLOTS = {
+    "PG": 1, "SG": 1, "SF": 1, "PF": 1, "C": 1,
+    "G": 1, "F": 1, "UTIL": 3, "BE": 3,
+}
+
+
+@dataclass(frozen=True)
+class Player:
+    id: str
+    name: str
+    positions: frozenset[str]
+    proj_points: float
+    espn_rank: float = float("inf")
+    adp: float = float("inf")
+    nba_team: str = ""
+
+    def __repr__(self) -> str:  # keep debug output short
+        return f"Player({self.name!r}, {'/'.join(sorted(self.positions))}, {self.proj_points:.0f})"
+
+
+@dataclass
+class TeamProfile:
+    """How an opponent is expected to draft.
+
+    strategy:
+      - "auto":   takes the best available player by `espn_rank` (no noise) —
+                  models ESPN autodraft.
+      - "adp":    drafts roughly by average draft position, with noise.
+      - "rank":   drafts roughly by ESPN rank, with noise (a human following
+                  the ESPN draft board).
+      - "points": drafts roughly by projected points, with noise (a "deep"
+                  drafter who has done their own homework).
+    noise: relative standard deviation applied to the sort key (0.15 = ±15%).
+    favorites: player name -> how many spots earlier they will take that
+               player than the strategy otherwise would.
+    """
+
+    name: str
+    strategy: str = "adp"
+    noise: float = 0.15
+    favorites: dict[str, float] = field(default_factory=dict)
+
+    VALID_STRATEGIES = ("auto", "adp", "rank", "points")
+
+    def __post_init__(self) -> None:
+        if self.strategy not in self.VALID_STRATEGIES:
+            raise ValueError(
+                f"team {self.name!r}: unknown strategy {self.strategy!r}, "
+                f"expected one of {self.VALID_STRATEGIES}"
+            )
+
+
+@dataclass
+class League:
+    teams: list[TeamProfile]  # in first-round draft order
+    my_slot: int  # 0-based index into `teams`
+    roster_slots: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_ROSTER_SLOTS))
+    bench_weight: float = 0.4
+
+    def __post_init__(self) -> None:
+        for slot in self.roster_slots:
+            if slot != BENCH and slot not in SLOT_ELIGIBILITY:
+                raise ValueError(f"unknown roster slot {slot!r}")
+        if not 0 <= self.my_slot < len(self.teams):
+            raise ValueError("my_slot out of range")
+
+    @property
+    def num_teams(self) -> int:
+        return len(self.teams)
+
+    @property
+    def rounds(self) -> int:
+        return sum(self.roster_slots.values())
+
+    @property
+    def total_picks(self) -> int:
+        return self.num_teams * self.rounds
+
+    @property
+    def starting_slots(self) -> list[str]:
+        return [s for s, n in self.roster_slots.items() if s != BENCH for _ in range(n)]
+
+    def team_for_pick(self, pick: int) -> int:
+        """Team index on the clock for 0-based overall pick number (snake order)."""
+        rnd, idx = divmod(pick, self.num_teams)
+        return idx if rnd % 2 == 0 else self.num_teams - 1 - idx
+
+    def picks_for_team(self, team: int, start: int = 0) -> list[int]:
+        return [p for p in range(start, self.total_picks) if self.team_for_pick(p) == team]
+
+
+@dataclass
+class DraftState:
+    league: League
+    players: dict[str, Player]
+    picks: list[str] = field(default_factory=list)  # player ids in pick order
+
+    @property
+    def current_pick(self) -> int:
+        return len(self.picks)
+
+    @property
+    def is_complete(self) -> bool:
+        return self.current_pick >= self.league.total_picks
+
+    def available(self) -> list[Player]:
+        taken = set(self.picks)
+        return [p for pid, p in self.players.items() if pid not in taken]
+
+    def rosters(self) -> list[list[Player]]:
+        out: list[list[Player]] = [[] for _ in range(self.league.num_teams)]
+        for i, pid in enumerate(self.picks):
+            out[self.league.team_for_pick(i)].append(self.players[pid])
+        return out
+
+    def my_next_picks(self) -> list[int]:
+        return self.league.picks_for_team(self.league.my_slot, self.current_pick)
