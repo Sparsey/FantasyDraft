@@ -82,8 +82,27 @@ def _status(state: DraftState) -> str:
         lines.append("On autodraft: " + ", ".join(league.teams[t].name for t in sorted(state.auto_teams)))
     roster = state.rosters()[league.my_slot]
     if roster:
+        lines.append("Your positions: " + _positions_line(state))
         lines.append("Your roster: " + ", ".join(f"{p.name} ({'/'.join(sorted(p.positions))})" for p in roster))
     return "\n".join(lines)
+
+
+def _positions_line(state: DraftState) -> str:
+    """e.g. 'PG 1/3  SG 2/3  SF 1/3  PF 1/3  C 3/3 (+1 over)' using flexible assignment."""
+    from .lineup import assign_lineup
+
+    league = state.league
+    roster = state.rosters()[league.my_slot]
+    slots = league.target_slots
+    owners, extra = assign_lineup(roster, slots)
+    filled = {pos: 0 for pos in league.targets}
+    for slot, p in zip(slots, owners):
+        if p is not None:
+            filled[slot] += 1
+    parts = [f"{pos} {filled[pos]}/{n}" for pos, n in league.targets.items()]
+    if extra:
+        parts.append(f"(over targets: {', '.join(p.name for p in extra)})")
+    return "  ".join(parts)
 
 
 def _print_recommendations(state: DraftState, args) -> None:

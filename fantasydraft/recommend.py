@@ -5,7 +5,7 @@ import random
 from dataclasses import dataclass
 from statistics import mean
 
-from .lineup import roster_value
+from .lineup import team_value
 from .models import POSITIONS, DraftState, Player
 from .simulate import Simulator, availability
 
@@ -22,12 +22,11 @@ class Recommendation:
 def candidate_pool(state: DraftState, k: int, exclude: set[str] = frozenset()) -> list[Player]:
     """Top players by immediate roster gain, plus the best player at each position."""
     league = state.league
-    slots = league.starting_slots
     roster = state.rosters()[league.my_slot]
-    base = roster_value(roster, slots, league.bench_weight)
+    base = team_value(roster, league)
     avail = sorted((p for p in state.available() if p.id not in exclude),
                    key=lambda p: p.proj_points, reverse=True)[: k * 4]
-    gains = {p.id: roster_value(roster + [p], slots, league.bench_weight) - base for p in avail}
+    gains = {p.id: team_value(roster + [p], league) - base for p in avail}
     by_gain = sorted(avail, key=lambda p: (gains[p.id], p.proj_points), reverse=True)
 
     picked: dict[str, Player] = {p.id: p for p in by_gain[:k]}
@@ -56,9 +55,8 @@ def recommend(
     if not state.my_next_picks():
         return []
     league = state.league
-    slots = league.starting_slots
     roster = state.rosters()[league.my_slot]
-    base = roster_value(roster, slots, league.bench_weight)
+    base = team_value(roster, league)
     my_picks = state.my_next_picks()
     on_clock = my_picks[0] == state.current_pick
 
@@ -75,7 +73,7 @@ def recommend(
         out.append(
             Recommendation(
                 player=p,
-                marginal_now=roster_value(roster + [p], slots, league.bench_weight) - base,
+                marginal_now=team_value(roster + [p], league) - base,
                 p_avail_now=1.0 if on_clock else (probs[0] if probs else 0.0),
                 p_avail_after=probs[1] if len(probs) > 1 else 0.0,
                 exp_final_value=mean(values),

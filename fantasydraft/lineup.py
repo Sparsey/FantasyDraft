@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Iterable, Sequence
 
-from .models import SLOT_ELIGIBILITY, Player
+from .models import SLOT_ELIGIBILITY, League, Player
 
 
 def assign_lineup(
@@ -52,3 +52,22 @@ def best_lineup(roster: Iterable[Player], slots: Sequence[str]) -> tuple[list[Pl
 def roster_value(roster: Iterable[Player], slots: Sequence[str], bench_weight: float) -> float:
     starters, bench = best_lineup(roster, slots)
     return sum(p.proj_points for p in starters) + bench_weight * sum(p.proj_points for p in bench)
+
+
+def over_targets(roster: Iterable[Player], league: League) -> list[Player]:
+    """Players beyond the league's position targets.
+
+    Multi-position players count toward whichever of their positions has
+    room, and the lowest-projected players are the ones left over.
+    """
+    _, extra = assign_lineup(roster, league.target_slots)
+    return extra
+
+
+def team_value(roster: list[Player], league: League) -> float:
+    """Projected value of a roster: best lineup + discounted bench, minus a
+    discount on players beyond the position targets (roster balance)."""
+    value = roster_value(roster, league.starting_slots, league.bench_weight)
+    if league.balance_penalty:
+        value -= league.balance_penalty * sum(p.proj_points for p in over_targets(roster, league))
+    return value

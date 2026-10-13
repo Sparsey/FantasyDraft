@@ -360,3 +360,22 @@ def test_recommend_skips_players_who_never_last():
     recs = recommend(state, candidates=4, sims=5)
     assert recs and all(r.p_avail_now > 0 for r in recs)
     assert "pg1" not in [r.player.name for r in recs]
+
+
+def test_balance_targets_discount_extra_centers():
+    from fantasydraft.lineup import over_targets, team_value
+
+    lg = League([TeamProfile("a"), TeamProfile("b")], 0)  # default slots: 13 players, targets 3 each
+    roster = [P("c1", "C", 2000), P("c2", "C", 1900), P("pfc", "PF/C", 1800)]
+    c4, g = P("c4", "C", 1700), P("g", "PG", 1650)
+    assert over_targets(roster + [c4], lg) == []  # PF/C counts as the PF
+    roster.append(P("c5", "C", 1750))
+    assert [p.name for p in over_targets(roster + [c4], lg)] == ["c4"]
+    base = team_value(roster, lg)
+    gain_c, gain_g = team_value(roster + [c4], lg) - base, team_value(roster + [g], lg) - base
+    assert gain_c == pytest.approx(1700 * 0.8)
+    assert gain_g == pytest.approx(1650)
+    assert gain_g > gain_c
+
+    no_balance = League([TeamProfile("a"), TeamProfile("b")], 0, balance_penalty=0.0)
+    assert team_value(roster + [c4], no_balance) - team_value(roster, no_balance) == pytest.approx(1700)

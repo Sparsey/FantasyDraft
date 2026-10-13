@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Iterator
 
 from .drafters import CANDIDATE_POOL, base_key, choose_pick, order_for
-from .lineup import roster_value
+from .lineup import team_value
 from .models import POSITIONS, DraftState, Player
 
 # My simulated picks consider this many top players by projection, plus the
@@ -75,10 +75,10 @@ class Simulator:
             need -= p.positions
             if i >= MY_POLICY_TOP_N and not need:
                 break
-        base = roster_value(roster, self.slots, self.league.bench_weight)
+        base = team_value(roster, self.league)
         return max(
             candidates.values(),
-            key=lambda p: (roster_value(roster + [p], self.slots, self.league.bench_weight) - base, p.proj_points),
+            key=lambda p: (team_value(roster + [p], self.league) - base, p.proj_points),
         )
 
     def run(self, rng: random.Random, my_next: Player | None = None, i_pick: bool = True) -> SimResult:
@@ -114,7 +114,7 @@ class Simulator:
                 taken_at[choice.id] = pick
             taken.add(choice.id)
 
-        return SimResult(taken_at, my_roster, roster_value(my_roster, self.slots, league.bench_weight))
+        return SimResult(taken_at, my_roster, team_value(my_roster, league))
 
 
 def availability(state: DraftState, sims: int = 200, seed: int = 0) -> dict[str, list[float]]:

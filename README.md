@@ -42,6 +42,8 @@ python -m fantasydraft watch --league examples/league.json
    | `favorites` | `{"Player Name": 10}` → takes that player ~10 spots early |
    | `bench_weight` | how much bench points count vs starters (league-wide) |
    | `players` | players CSV path or Google Sheets link (league-wide) |
+   | `position_targets` | roster balance, e.g. `{"PG": 3, "SG": 3, "SF": 2, "PF": 2, "C": 3}`. Default: an even split rounded up (3 each for 13 players). Multi-position players count wherever there's room |
+   | `balance_penalty` | how much a player beyond the targets is discounted (default `0.2` = worth 80%; `0` turns balancing off) |
 
 3. **Draft day**: the most reliable option is following the draft room
    itself with `room` + `watch` (see [browser/README.md](browser/README.md)).

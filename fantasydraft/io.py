@@ -131,6 +131,8 @@ def load_league(path: str | Path) -> League:
         my_slot=my_slot,
         roster_slots=cfg.get("roster_slots", dict(DEFAULT_ROSTER_SLOTS)),
         bench_weight=float(cfg.get("bench_weight", 0.4)),
+        position_targets=cfg.get("position_targets"),
+        balance_penalty=float(cfg.get("balance_penalty", 0.2)),
     )
 
 

@@ -80,6 +80,11 @@ class League:
     my_slot: int  # 0-based index into `teams`
     roster_slots: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_ROSTER_SLOTS))
     bench_weight: float = 0.4
+    # Roster balance: how many players of each position you aim for, and how
+    # much a player beyond those targets is discounted (0.2 = worth 80%).
+    # None = an even split, rounded up (3 each for a 13-player roster).
+    position_targets: dict[str, int] | None = None
+    balance_penalty: float = 0.2
 
     def __post_init__(self) -> None:
         for slot in self.roster_slots:
@@ -87,6 +92,21 @@ class League:
                 raise ValueError(f"unknown roster slot {slot!r}")
         if not 0 <= self.my_slot < len(self.teams):
             raise ValueError("my_slot out of range")
+        if self.position_targets is not None:
+            unknown = set(self.position_targets) - set(POSITIONS)
+            if unknown:
+                raise ValueError(f"position_targets: unknown positions {sorted(unknown)} (use {POSITIONS})")
+
+    @property
+    def targets(self) -> dict[str, int]:
+        if self.position_targets is not None:
+            return {pos: int(self.position_targets.get(pos, 0)) for pos in POSITIONS}
+        even = -(-self.rounds // len(POSITIONS))  # ceil
+        return {pos: even for pos in POSITIONS}
+
+    @property
+    def target_slots(self) -> list[str]:
+        return [pos for pos, n in self.targets.items() for _ in range(n)]
 
     @property
     def num_teams(self) -> int:
