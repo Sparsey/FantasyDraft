@@ -10,3 +10,4 @@ __pycache__/
 espn_dump*.json
 /capture*.jsonl
 /capture_summary*.txt
+/draft_feed*.jsonl

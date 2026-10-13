@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Draft Board</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #16181d; --muted: #6b7280; --line: #e3e5ea;
+    --accent: #2563eb; --accent-soft: #e8efff; --good: #15803d; --good-soft: #e7f6ec;
+    --warn: #b45309; --warn-soft: #fdf3e2; --bad: #b91c1c; --bad-soft: #fdecec;
+    --mine: #fff8db; --shadow: 0 1px 2px rgba(16,24,40,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --panel: #171a21; --ink: #e8eaef; --muted: #9aa3b2; --line: #262b35;
+      --accent: #6ea0ff; --accent-soft: #1b2741; --good: #4ade80; --good-soft: #14281c;
+      --warn: #fbbf24; --warn-soft: #2d2410; --bad: #f87171; --bad-soft: #301617;
+      --mine: #2a2614; --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .num { font-variant-numeric: tabular-nums; text-align: right; }
+  .muted { color: var(--muted); }
+  button { font: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--panel);
+           color: var(--ink); border-radius: 6px; padding: 4px 10px; }
+  button:hover { border-color: var(--accent); }
+
+  /* top bar */
+  header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line);
+           display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 10px 16px; }
+  .pickno { font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+  .pickno small { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 6px; }
+  .clock { display: flex; align-items: baseline; gap: 8px; }
+  .clock .who { font-weight: 600; }
+  .clock .time { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 18px; }
+  .clock .time.low { color: var(--bad); }
+  .mypick { padding: 6px 12px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .mypick.up { background: var(--good); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
+  .mypick.soon { background: var(--warn-soft); color: var(--warn); }
+  @keyframes pulse { 50% { opacity: .75; } }
+  .feed { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .dot.live { background: var(--good); box-shadow: 0 0 0 3px var(--good-soft); }
+  .dot.bad { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+  .banner { display: none; padding: 8px 16px; background: var(--bad-soft); color: var(--bad); font-weight: 500; }
+  .banner.show { display: block; }
+
+  /* layout */
+  main { display: grid; gap: 14px; padding: 14px 16px 40px;
+         grid-template-columns: minmax(0, 2.1fr) minmax(0, 1fr) minmax(0, 1.1fr); }
+  @media (max-width: 1150px) { main { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+                               .col3 { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; } }
+  @media (max-width: 760px) { main { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+                              .col3 { grid-template-columns: minmax(0, 1fr); } }
+  .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); min-width: 0; }
+  .panel h2 { margin: 0; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+              color: var(--muted); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .panel > .head { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .panel > .body { padding: 6px 4px 8px; overflow-x: auto; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { font-size: 11px; font-weight: 600; color: var(--muted); text-align: left; padding: 4px 8px; white-space: nowrap; }
+  th.num { text-align: right; }
+  td { padding: 5px 8px; border-top: 1px solid var(--line); white-space: nowrap; }
+  tr.top td { background: var(--good-soft); }
+  tr.top td:first-child { box-shadow: inset 3px 0 0 var(--good); }
+  .pname { font-weight: 600; }
+  .pos { font-size: 11px; color: var(--muted); margin-left: 6px; }
+  .delta.neg { color: var(--muted); }
+  .bar { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; min-width: 74px; }
+  .bar i { display: inline-block; width: 36px; height: 6px; border-radius: 3px; background: var(--line); position: relative; overflow: hidden; }
+  .bar i b { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+  .bar.hi i b { background: var(--good); } .bar.lo i b { background: var(--bad); }
+  .add { padding: 1px 7px; font-size: 12px; color: var(--muted); }
+  .spin { font-size: 12px; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--accent); }
+  .suggest { padding: 8px 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .suggest b { color: var(--ink); }
+  .tabs { display: flex; gap: 4px; }
+  .tabs button { border: none; background: none; color: var(--muted); font-size: 12px; font-weight: 700;
+                 text-transform: uppercase; letter-spacing: .06em; padding: 2px 6px; border-radius: 5px; }
+  .tabs button.on { background: var(--accent-soft); color: var(--accent); }
+
+  /* entry */
+  .entry { display: flex; gap: 8px; padding: 10px 12px; position: relative; }
+  .entry input { flex: 1; min-width: 0; font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px;
+                 background: var(--bg); color: var(--ink); }
+  .entry input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .results { position: absolute; left: 12px; right: 12px; top: 46px; z-index: 6; background: var(--panel);
+             border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); display: none; overflow: hidden; }
+  .results.show { display: block; }
+  .results div { padding: 7px 10px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+  .results div.sel, .results div:hover { background: var(--accent-soft); }
+  .msg { padding: 0 12px 8px; font-size: 13px; min-height: 18px; color: var(--muted); }
+  .msg.err { color: var(--bad); }
+
+  /* lineup */
+  .slot { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 8px; padding: 5px 10px; border-top: 1px solid var(--line); align-items: baseline; }
+  .slot:first-child { border-top: none; }
+  .slot .s { font-size: 11px; font-weight: 700; color: var(--muted); }
+  .slot .empty { color: var(--muted); font-style: italic; }
+  .slot .p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .total { padding: 8px 10px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; font-weight: 600; }
+
+  /* teams */
+  .team { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 10px; border-top: 1px solid var(--line); }
+  .team:first-child { border-top: none; }
+  .team.me { background: var(--mine); }
+  .team.clock { box-shadow: inset 3px 0 0 var(--accent); }
+  .team .n { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .team .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .team .sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; }
+  .toggle .sw { width: 30px; height: 17px; border-radius: 9px; background: var(--line); position: relative; transition: background .15s; }
+  .toggle .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; transition: transform .15s; }
+  .toggle.on { color: var(--warn); font-weight: 600; }
+  .toggle.on .sw { background: var(--warn); }
+  .toggle.on .sw::after { transform: translateX(13px); }
+
+  .recent { max-height: 340px; overflow-y: auto; }
+  .rp { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 8px; padding: 5px 10px; border-top: 1px solid var(--line); }
+  .rp:first-child { border-top: none; }
+  .rp.mine { background: var(--mine); }
+  .rp .n { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .rp .t { font-size: 12px; color: var(--muted); }
+  .tag { font-size: 10px; font-weight: 700; color: var(--warn); background: var(--warn-soft); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+  .log { font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 8px 10px; color: var(--muted);
+         white-space: pre-wrap; max-height: 160px; overflow-y: auto; }
+  .empty-note { padding: 16px 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div class="pickno" id="pickno">Pick –</div>
+  <div class="clock"><span class="muted">On the clock</span> <span class="who" id="who">–</span> <span class="time" id="time"></span></div>
+  <div class="mypick" id="mypick">–</div>
+  <div class="feed"><span class="dot" id="dot"></span><span id="feedtxt">connecting…</span></div>
+</header>
+<div class="banner" id="banner"></div>
+
+<main>
+  <div class="col">
+    <section class="panel">
+      <div class="head"><h2><span>Record a pick</span><button id="undo" title="Remove the last pick or autodraft switch">Undo</button></h2></div>
+      <div class="entry">
+        <input id="q" placeholder="ESPN rank or player name — Enter records the next pick" autocomplete="off">
+        <div class="results" id="results"></div>
+      </div>
+      <div class="msg" id="msg"></div>
+    </section>
+
+    <section class="panel">
+      <div class="head"><h2>
+        <span class="tabs"><button class="on" data-tab="recs">Recommendations</button><button data-tab="avail">Best available</button></span>
+        <span class="spin" id="spin"></span></h2></div>
+      <div class="body" id="tablebody"></div>
+      <div class="suggest" id="suggest" hidden></div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="panel">
+      <div class="head"><h2><span>Your lineup</span><span id="mycount" class="muted"></span></h2></div>
+      <div id="lineup"></div>
+    </section>
+  </div>
+
+  <div class="col col3">
+    <section class="panel">
+      <div class="head"><h2><span>Teams</span><span class="muted">autodraft</span></h2></div>
+      <div id="teams"></div>
+    </section>
+    <section class="panel">
+      <div class="head"><h2>Recent picks</h2></div>
+      <div class="recent" id="recent"></div>
+      <div class="head" style="border-top:1px solid var(--line)"><h2>Log</h2></div>
+      <div class="log" id="log"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const pct = (x) => x == null ? "–" : Math.round(x * 100) + "%";
+let S = null, players = [], playersVersion = -1, tab = "recs", clockAt = 0, sel = 0;
+
+function bar(p) {
+  if (p == null) return "–";
+  const cls = p >= 0.7 ? "hi" : p <= 0.3 ? "lo" : "";
+  return `<span class="bar ${cls}"><i><b style="width:${Math.round(p * 100)}%"></b></i>${pct(p)}</span>`;
+}
+function addBtn(id) { return `<button class="add" data-pick="${esc(id)}" title="Record as the next pick">+</button>`; }
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  return r.json();
+}
+
+async function refresh() {
+  try {
+    S = await api("/api/state");
+    if (S.version !== playersVersion) { players = await api("/api/players"); playersVersion = S.version; }
+    clockAt = performance.now();
+    render();
+  } catch (e) {
+    $("dot").className = "dot bad"; $("feedtxt").textContent = "dashboard server not running";
+  }
+}
+
+function render() {
+  const st = S.status;
+  $("pickno").innerHTML = st.complete ? "Draft complete" : `Pick ${st.pick}<small>Round ${st.round} of ${st.rounds}</small>`;
+  $("who").textContent = st.on_clock ? st.on_clock.name : "–";
+  const mp = $("mypick");
+  if (st.picks_until === 0) { mp.className = "mypick up"; mp.textContent = "You're on the clock"; }
+  else if (st.picks_until != null) {
+    mp.className = "mypick" + (st.picks_until <= 2 ? " soon" : "");
+    mp.textContent = `Your pick #${st.my_next} · ${st.picks_until} pick${st.picks_until === 1 ? "" : "s"} away`;
+  } else { mp.className = "mypick"; mp.textContent = "Your draft is done"; }
+
+  const f = S.feed;
+  const live = f.last_message_age != null && f.last_message_age < 20;
+  $("dot").className = "dot" + (f.blocked ? " bad" : live ? " live" : "");
+  $("feedtxt").textContent = f.blocked ? "lost track — see banner" : live ? "live from ESPN draft room"
+    : f.connected ? "draft page connected, waiting for picks" : "manual entry (no draft-room feed)";
+  const b = $("banner");
+  b.className = "banner" + (f.blocked ? " show" : "");
+  b.textContent = f.blocked ? `Lost track of the draft (${f.blocked}). New picks are held until it resyncs — open the draft room's Pick History, or fix the picks file and restart.` : "";
+
+  const r = S.result || {};
+  $("spin").textContent = S.computing ? "updating…" : r.error ? r.error : "";
+  renderTable(r);
+  const sg = $("suggest");
+  sg.hidden = !S.suggestion;
+  if (S.suggestion) sg.innerHTML = `ESPN would autopick for you: <b>${esc(S.suggestion.name)}</b> <span class="pos">${esc(S.suggestion.pos)}</span>`;
+
+  // lineup
+  let total = 0, html = "";
+  for (const s of S.lineup) {
+    if (s.proj) total += s.proj;
+    html += `<div class="slot"><span class="s">${esc(s.slot)}</span>` +
+      (s.name ? `<span class="p">${esc(s.name)}<span class="pos">${esc(s.pos)}</span></span><span class="num muted">${s.proj}</span>`
+              : `<span class="empty">empty</span><span></span>`) + `</div>`;
+  }
+  for (let i = 0; i < Math.max(S.bench_slots, S.bench.length); i++) {
+    const p = S.bench[i];
+    html += `<div class="slot"><span class="s">BE</span>` +
+      (p ? `<span class="p">${esc(p.name)}<span class="pos">${esc(p.pos)}</span></span><span class="num muted">${p.proj}</span>`
+         : `<span class="empty">empty</span><span></span>`) + `</div>`;
+  }
+  html += `<div class="total"><span>Starters projected</span><span class="num">${total.toLocaleString()}</span></div>`;
+  $("lineup").innerHTML = html;
+  $("mycount").textContent = `${S.lineup.filter((s) => s.name).length + S.bench.length} players`;
+
+  // teams
+  $("teams").innerHTML = S.teams.map((t) => `
+    <div class="team${t.me ? " me" : ""}${st.on_clock && st.on_clock.slot === t.slot ? " clock" : ""}">
+      <span class="n">${t.slot + 1}</span>
+      <div style="min-width:0"><div class="nm">${esc(t.name)}${t.me ? " (you)" : ""}</div>
+        <div class="sub">${esc(t.strategy)} · ${t.count} picked${t.last ? " · " + esc(t.last) : ""}</div></div>
+      <span class="toggle${t.auto ? " on" : ""}" data-slot="${t.slot}" data-on="${t.auto ? 0 : 1}"
+            title="Mark this team as on/off autodraft">${t.auto ? "AUTO" : "off"}<span class="sw"></span></span>
+    </div>`).join("");
+
+  $("recent").innerHTML = S.recent.length ? S.recent.map((p) => `
+    <div class="rp${p.mine ? " mine" : ""}"><span class="n">#${p.pick}</span>
+      <div><span class="pname">${esc(p.name)}</span><span class="pos">${esc(p.pos)}</span>${p.auto ? '<span class="tag">AUTO</span>' : ""}
+      <div class="t">${esc(p.team)}</div></div></div>`).join("") : `<div class="empty-note">No picks yet.</div>`;
+  const log = $("log");
+  log.textContent = S.log.join("\n");
+  log.scrollTop = log.scrollHeight;
+}
+
+function renderTable(r) {
+  const body = $("tablebody");
+  if (tab === "recs") {
+    if (!r.recs) { body.innerHTML = `<div class="empty-note">Working out recommendations…</div>`; return; }
+    if (!r.recs.length) { body.innerHTML = `<div class="empty-note">Nothing to recommend — your draft is done.</div>`; return; }
+    body.innerHTML = `<table><thead><tr><th>Player</th><th class="num">Rank</th><th class="num">Proj</th>
+      <th class="num" title="Immediate gain to your best lineup">Gain now</th>
+      <th class="num" title="Chance the player is still there at your next pick">Avail @ my pick</th>
+      <th class="num" title="Chance the player lasts to the pick after that, if you pass">Lasts to next</th>
+      <th class="num" title="Average projected value of your final roster if you take this player">Final team</th><th class="num">vs best</th><th></th></tr></thead><tbody>` +
+      r.recs.map((x, i) => `<tr class="${i === 0 ? "top" : ""}">
+        <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span></td>
+        <td class="num muted">${x.rank ?? "–"}</td><td class="num">${x.proj}</td><td class="num">+${x.gain}</td>
+        <td class="num">${bar(x.p_now)}</td><td class="num">${bar(x.p_after)}</td>
+        <td class="num">${x.value.toLocaleString()}</td><td class="num delta ${x.vs_best < 0 ? "neg" : ""}">${x.vs_best === 0 ? "best" : x.vs_best}</td>
+        <td>${addBtn(x.id)}</td></tr>`).join("") + `</tbody></table>`;
+  } else {
+    if (!r.available) { body.innerHTML = `<div class="empty-note">Working…</div>`; return; }
+    const mine = S.status.my_picks.slice(0, 3);
+    body.innerHTML = `<table><thead><tr><th>Player</th><th class="num">Rank</th><th class="num">ADP</th><th class="num">Proj</th>` +
+      mine.map((m) => `<th class="num">Avail @ #${m}</th>`).join("") + `<th></th></tr></thead><tbody>` +
+      r.available.map((x) => `<tr><td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span></td>
+        <td class="num muted">${x.rank ?? "–"}</td><td class="num muted">${x.adp != null ? Math.round(x.adp * 10) / 10 : "–"}</td><td class="num">${x.proj}</td>` +
+        mine.map((_, k) => `<td class="num">${bar(x.p[k])}</td>`).join("") + `<td>${addBtn(x.id)}</td></tr>`).join("") + `</tbody></table>`;
+  }
+}
+
+// countdown between polls
+setInterval(() => {
+  const el = $("time");
+  if (!S || S.status.seconds_left == null || S.status.complete) { el.textContent = ""; return; }
+  const left = Math.max(0, S.status.seconds_left - (performance.now() - clockAt) / 1000);
+  el.textContent = `0:${String(Math.floor(left)).padStart(2, "0")}`.replace(/^0:(\d\d\d)/, "$1");
+  el.className = "time" + (left <= 10 ? " low" : "");
+}, 250);
+
+// tabs
+document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
+  tab = b.dataset.tab;
+  document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
+  if (S) renderTable(S.result || {});
+});
+
+// record picks
+function showMsg(text, err) { const m = $("msg"); m.textContent = text; m.className = "msg" + (err ? " err" : ""); }
+async function record(id) {
+  const res = await api("/api/pick", {id});
+  showMsg(res.ok ? res.message.replace(/\s+/g, " ").trim() + " — wrong? press Undo" : res.error, !res.ok);
+  $("q").value = ""; $("results").className = "results";
+  refresh();
+}
+function matches(q) {
+  q = q.trim().toLowerCase();
+  if (!q) return [];
+  if (/^\d+$/.test(q)) return players.filter((p) => p.rank === Number(q));
+  return players.filter((p) => p.name.toLowerCase().includes(q))
+    .sort((a, b) => (a.name.toLowerCase().startsWith(q) ? 0 : 1) - (b.name.toLowerCase().startsWith(q) ? 0 : 1) || (a.rank ?? 9999) - (b.rank ?? 9999))
+    .slice(0, 8);
+}
+function drawResults() {
+  const list = matches($("q").value);
+  const box = $("results");
+  sel = Math.min(sel, Math.max(list.length - 1, 0));
+  box.innerHTML = list.map((p, i) => `<div class="${i === sel ? "sel" : ""}" data-pick="${esc(p.id)}">
+      <span class="pname">${esc(p.name)}</span><span class="pos">${esc(p.pos)} ${esc(p.team || "")}</span>
+      <span class="muted" style="margin-left:auto">rank ${p.rank ?? "–"} · ${p.proj}</span></div>`).join("")
+    || ($("q").value.trim() ? `<div class="muted">No available player matches</div>` : "");
+  box.className = "results" + (box.innerHTML ? " show" : "");
+  return list;
+}
+$("q").addEventListener("input", () => { sel = 0; drawResults(); });
+$("q").addEventListener("keydown", (e) => {
+  const list = matches($("q").value);
+  if (e.key === "ArrowDown") { sel = Math.min(sel + 1, list.length - 1); drawResults(); e.preventDefault(); }
+  else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); drawResults(); e.preventDefault(); }
+  else if (e.key === "Enter" && list[sel]) record(list[sel].id);
+  else if (e.key === "Escape") { $("results").className = "results"; }
+});
+document.addEventListener("click", (e) => {
+  const pick = e.target.closest("[data-pick]");
+  if (pick) {
+    // With the live feed running, picks arrive by themselves; confirm hand entries.
+    const live = S && S.feed.last_message_age != null && S.feed.last_message_age < 20;
+    const p = players.find((x) => x.id === pick.dataset.pick);
+    if (live && pick.classList.contains("add") &&
+        !confirm(`The draft room feed is live. Record ${p ? p.name : "this player"} as pick #${S.status.pick} by hand anyway?`)) return;
+    record(pick.dataset.pick); return;
+  }
+  const tg = e.target.closest(".toggle");
+  if (tg) { api("/api/auto", {slot: Number(tg.dataset.slot), on: tg.dataset.on === "1"}).then(refresh); return; }
+  if (!e.target.closest(".entry")) $("results").className = "results";
+});
+$("undo").onclick = async () => {
+  const res = await api("/api/undo", {});
+  showMsg(res.ok ? res.message : res.error, !res.ok);
+  refresh();
+};
+
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

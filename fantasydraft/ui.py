@@ -1,0 +1,271 @@
+"""Draft dashboard: a local web page plus the draft-room feed, in one process.
+
+    python -m fantasydraft ui --league league.json --picks picks.txt
+
+Open http://127.0.0.1:8765 next to the ESPN draft tab. The browser userscript
+posts the draft room's live feed to the same server (/log), so picks and
+autodraft switches arrive by themselves. Without the userscript, enter picks
+on the page. Recommendations are recomputed in a background thread whenever
+the draft changes, so the page never blocks on a simulation.
+"""
+from __future__ import annotations
+
+import json
+import threading
+import time
+import traceback
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from .io import apply_log, is_placeholder, load_state
+from .lineup import assign_lineup
+from .models import DraftState, Player
+from .recommend import recommend
+from .room import RoomTracker
+from .simulate import availability
+
+PAGE = Path(__file__).parent / "web" / "index.html"
+
+
+def _pos(p: Player) -> str:
+    return "/".join(sorted(p.positions))
+
+
+def _num(x: float) -> float | None:
+    return None if x == float("inf") else x
+
+
+class Dashboard:
+    def __init__(self, players_src, league_path, picks_path, raw_log, sims: int, candidates: int):
+        state = load_state(players_src, league_path, None)
+        self.league = state.league
+        self.players = state.players
+        self.tracker = RoomTracker(self.league, self.players, picks_path, log=self._log)
+        self.raw_log = Path(raw_log) if raw_log else None
+        self.sims, self.candidates = sims, candidates
+        self.lock = threading.RLock()
+        self.wake = threading.Condition(self.lock)
+        self.result: dict = {"version": -1}
+        self.computing = False
+        self.page_connected: float | None = None
+        threading.Thread(target=self._worker, daemon=True).start()
+
+    def _log(self, line: str) -> None:
+        print(line, flush=True)
+
+    # --- state -----------------------------------------------------------------
+
+    def state(self) -> DraftState:
+        st = DraftState(self.league, self.players)
+        apply_log(st, self.tracker.entries)
+        return st
+
+    def _changed(self) -> None:
+        with self.wake:
+            self.wake.notify_all()
+
+    def _worker(self) -> None:
+        while True:
+            with self.wake:
+                while self.result["version"] == self.tracker.version:
+                    self.wake.wait(timeout=5)
+                version = self.tracker.version
+                st = self.state()
+                self.computing = True
+            try:
+                result = self._compute(st)
+            except Exception:
+                traceback.print_exc()
+                result = {"error": "recommendation failed — see terminal"}
+            with self.lock:
+                self.computing = False
+                result["version"] = version
+                self.result = result
+
+    def _compute(self, st: DraftState) -> dict:
+        if st.is_complete or not st.my_next_picks():
+            return {"recs": [], "available": []}
+        recs = recommend(st, candidates=self.candidates, sims=self.sims)
+        probs = availability(st, sims=max(self.sims * 2, 100))
+        top = sorted((p for p in st.available() if not is_placeholder(p)),
+                     key=lambda p: p.proj_points, reverse=True)[:40]
+        best = recs[0].exp_final_value if recs else 0.0
+        return {
+            "recs": [{
+                "id": r.player.id, "name": r.player.name, "pos": _pos(r.player),
+                "team": r.player.nba_team, "proj": round(r.player.proj_points),
+                "rank": _num(r.player.espn_rank), "gain": round(r.marginal_now),
+                "p_now": r.p_avail_now, "p_after": r.p_avail_after,
+                "value": round(r.exp_final_value), "vs_best": round(r.exp_final_value - best),
+            } for r in recs],
+            "available": [{
+                "id": p.id, "name": p.name, "pos": _pos(p), "team": p.nba_team,
+                "proj": round(p.proj_points), "rank": _num(p.espn_rank), "adp": _num(p.adp),
+                "p": probs.get(p.id, [])[:3],
+            } for p in top],
+        }
+
+    def snapshot(self) -> dict:
+        with self.lock:
+            tr = self.tracker
+            st = self.state()
+            lg = self.league
+            pick = st.current_pick
+            mine = st.my_next_picks()
+            rosters = st.rosters()
+            owners, bench = assign_lineup(rosters[lg.my_slot], lg.starting_slots)
+            on_clock = lg.team_for_pick(pick) if not st.is_complete else None
+            recent = []
+            for i in range(max(0, pick - 30), pick):
+                p = self.players[st.picks[i]]
+                slot = lg.team_for_pick(i)
+                recent.append({"pick": i + 1, "team": tr.name(slot), "slot": slot, "name": p.name,
+                               "pos": _pos(p), "auto": i in st.auto_picks, "mine": slot == lg.my_slot})
+            suggestion = self.players.get(tr.suggestion) if tr.suggestion else None
+            return {
+                "version": tr.version,
+                "computing": self.computing or self.result["version"] != tr.version,
+                "status": {
+                    "pick": pick + 1, "round": pick // lg.num_teams + 1, "rounds": lg.rounds,
+                    "teams": lg.num_teams, "complete": st.is_complete,
+                    "on_clock": None if on_clock is None else {"slot": on_clock, "name": tr.name(on_clock)},
+                    "my_next": mine[0] + 1 if mine else None,
+                    "picks_until": mine[0] - pick if mine else None,
+                    "my_picks": [m + 1 for m in mine],
+                    "seconds_left": tr.seconds_left(),
+                },
+                "feed": {
+                    "connected": self.page_connected is not None,
+                    "last_message_age": None if tr.last_feed is None else time.time() - tr.last_feed,
+                    "blocked": tr.blocked,
+                },
+                "suggestion": None if suggestion is None else {"id": suggestion.id, "name": suggestion.name,
+                                                               "pos": _pos(suggestion)},
+                "me": {"slot": lg.my_slot, "name": tr.name(lg.my_slot)},
+                "lineup": [{"slot": s, "name": p.name if p else None, "pos": _pos(p) if p else "",
+                            "proj": round(p.proj_points) if p else None}
+                           for s, p in zip(lg.starting_slots, owners)],
+                "bench": [{"name": p.name, "pos": _pos(p), "proj": round(p.proj_points)} for p in bench],
+                "bench_slots": lg.roster_slots.get("BE", 0),
+                "teams": [{
+                    "slot": i, "name": tr.name(i), "strategy": t.strategy, "auto": i in st.auto_teams,
+                    "me": i == lg.my_slot, "count": len(rosters[i]),
+                    "last": rosters[i][-1].name if rosters[i] else None,
+                } for i, t in enumerate(lg.teams)],
+                "recent": recent[::-1],
+                "log": list(tr.recent_log)[-12:],
+                "result": self.result,
+            }
+
+    def players_list(self) -> list[dict]:
+        with self.lock:
+            taken = set(self.tracker.picks)
+        return [{"id": p.id, "name": p.name, "pos": _pos(p), "team": p.nba_team,
+                 "proj": round(p.proj_points), "rank": _num(p.espn_rank)}
+                for p in self.players.values() if p.id not in taken and not is_placeholder(p)]
+
+    # --- actions ---------------------------------------------------------------
+
+    def action(self, path: str, body: dict) -> dict:
+        with self.lock:
+            tr = self.tracker
+            if path == "/api/pick":
+                msg = tr.manual_pick(str(body["id"]))
+            elif path == "/api/undo":
+                msg = "undid " + tr.undo()
+            elif path == "/api/auto":
+                tr.manual_auto(int(body["slot"]), bool(body["on"]))
+                msg = "ok"
+            else:
+                raise KeyError(path)
+        self._changed()
+        return {"ok": True, "message": msg}
+
+    def feed(self, events: list[dict]) -> None:
+        with self.lock:
+            if self.raw_log:
+                with self.raw_log.open("a", encoding="utf-8") as f:
+                    for e in events:
+                        f.write(json.dumps(e) + "\n")
+            before = self.tracker.version
+            for e in events:
+                kind = e.get("kind")
+                if kind == "ws-in":
+                    self.tracker.handle_message(str(e.get("data", "")))
+                elif kind == "dom-text":
+                    self.tracker.handle_page_text(str(e.get("data", "")))
+                elif kind == "hello":
+                    self.page_connected = time.time()
+                    print(f"Draft page connected: {e.get('url', '')}", flush=True)
+            changed = self.tracker.version != before
+        if changed:
+            self._changed()
+
+
+def serve(dash: Dashboard, port: int = 8765, open_browser: bool = True) -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, code: int, body: bytes = b"", ctype: str = "application/json") -> None:
+            self.send_response(code)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+            self.send_header("Cache-Control", "no-store")
+            if body:
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+
+        def _json(self, obj, code: int = 200) -> None:
+            self._send(code, json.dumps(obj).encode())
+
+        def do_OPTIONS(self) -> None:  # noqa: N802
+            self._send(204)
+
+        def do_GET(self) -> None:  # noqa: N802
+            path = self.path.split("?")[0]
+            if path in ("/", "/index.html"):
+                self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+            elif path == "/api/state":
+                self._json(dash.snapshot())
+            elif path == "/api/players":
+                self._json(dash.players_list())
+            else:
+                self._send(404)
+
+        def do_POST(self) -> None:  # noqa: N802
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError:
+                self._json({"ok": False, "error": "bad JSON"}, 400)
+                return
+            path = self.path.split("?")[0]
+            if path == "/log":  # from the userscript
+                dash.feed(body if isinstance(body, list) else [body])
+                self._send(204)
+                return
+            try:
+                self._json(dash.action(path, body))
+            except KeyError:
+                self._send(404)
+            except ValueError as e:
+                self._json({"ok": False, "error": str(e)}, 400)
+
+        def log_message(self, *args) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    url = f"http://127.0.0.1:{port}/"
+    print(f"Dashboard: {url}  (Ctrl+C to stop)", flush=True)
+    if open_browser:
+        threading.Timer(0.5, lambda: webbrowser.open(url)).start()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()

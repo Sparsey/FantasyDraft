@@ -409,6 +409,14 @@ def cmd_capture(args) -> None:
         serve(args.out, args.port)
 
 
+def cmd_ui(args) -> None:
+    """Dashboard in the browser, fed live by the draft-room userscript (or manual entry)."""
+    from .ui import Dashboard, serve
+
+    dash = Dashboard(args.players, args.league, args.picks, args.out, sims=args.sims, candidates=args.candidates)
+    serve(dash, args.port, open_browser=not args.no_browser)
+
+
 def cmd_room(args) -> None:
     """Follow an ESPN draft room through the browser userscript; write picks.txt live."""
     from .capture import serve
@@ -527,6 +535,15 @@ def main(argv: list[str] | None = None) -> None:
     espn(p)
     p.add_argument("--out", default="league.json")
     p.set_defaults(func=cmd_fetch_league)
+
+    p = sub.add_parser("ui", help="draft dashboard in your browser (live from the ESPN draft room, or manual entry)")
+    files(p)
+    p.add_argument("--sims", type=int, default=60, help="Monte Carlo runs per candidate (lower = faster)")
+    p.add_argument("--candidates", type=int, default=8)
+    p.add_argument("--out", default="draft_feed.jsonl", help="raw draft-room log (troubleshooting)")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--no-browser", action="store_true", help="don't open the dashboard automatically")
+    p.set_defaults(func=cmd_ui)
 
     p = sub.add_parser("room", help="follow an ESPN draft room live via the browser userscript (writes picks.txt)")
     files(p)

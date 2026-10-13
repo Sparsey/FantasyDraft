@@ -18,6 +18,8 @@ to the picks file (as @auto/@back lines), which `watch` and `draft` read.
 from __future__ import annotations
 
 import re
+import time
+from collections import deque
 from pathlib import Path
 from typing import Callable
 
@@ -43,6 +45,17 @@ class RoomTracker:
         self.buffer: list[str] = []  # feed messages held while blocked
         self.suggestion: str | None = None
         self.slot_names: dict[int, str] = {}  # learned from page text, display only
+        self.version = 0  # bumped whenever picks/autodraft change
+        self.clock: tuple[float, float] | None = None  # (when seen, seconds left then)
+        self.last_feed: float | None = None  # time of the last draft-room message
+        self.recent_log: deque[str] = deque(maxlen=60)
+        outer_log = log
+
+        def _log(line: str) -> None:
+            self.recent_log.append(line)
+            outer_log(line)
+
+        self.log = _log
         if self.entries:
             self.log(f"resuming with {len(self.picks)} picks already in {self.path}")
 
@@ -64,6 +77,47 @@ class RoomTracker:
 
     def _save(self) -> None:
         save_log(self.entries, self.players, self.league, self.path)
+        self.version += 1
+
+    def seconds_left(self) -> float | None:
+        if self.clock is None:
+            return None
+        seen, left = self.clock
+        return max(left - (time.time() - seen), 0.0)
+
+    # --- manual control (UI) ------------------------------------------------------
+
+    def manual_pick(self, pid: str) -> str:
+        if pid not in self.players:
+            raise ValueError(f"unknown player {pid}")
+        if pid in self.picks:
+            raise ValueError(f"{self.players[pid].name} is already drafted")
+        pick = len(self.picks)
+        if pick >= self.league.total_picks:
+            raise ValueError("the draft is complete")
+        self.entries.append(("pick", pid))
+        self._save()
+        slot = self.league.team_for_pick(pick)
+        self.clock = None
+        line = f"#{pick + 1:>3} {self.name(slot):<24} {self.players[pid].name}  (entered by hand)"
+        self.log(line)
+        return line
+
+    def undo(self) -> str:
+        if not self.entries:
+            raise ValueError("nothing to undo")
+        last = self.entries.pop()
+        self._save()
+        what = self.players[last[1]].name if last[0] == "pick" else \
+            f"{self.name(last[1])} {'auto' if last[2] else 'back'}"
+        self.log(f"   undid: {what}")
+        return what
+
+    def manual_auto(self, slot: int, on: bool) -> None:
+        if not 0 <= slot < self.league.num_teams:
+            raise ValueError("no such team")
+        if self._set_auto(slot, on):
+            self._save()
 
     # --- team mapping --------------------------------------------------------------
 
@@ -114,7 +168,12 @@ class RoomTracker:
         if not parts:
             return
         kind = parts[0]
+        self.last_feed = time.time()
         try:
+            if kind == "CLOCK" and len(parts) >= 3:
+                self.clock = (time.time(), int(parts[2]) / 1000)
+            elif kind == "SELECTING" and len(parts) >= 3:
+                self.clock = (time.time(), int(parts[2]) / 1000)
             if kind == "TOKEN" and len(parts) > 1:
                 fields = parts[1].split(":")
                 if len(fields) > 2 and fields[2].isdigit():
