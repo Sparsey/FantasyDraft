@@ -124,11 +124,13 @@ def summarize(path: str | Path, samples: int = 3) -> str:
     timeline = [e for e in events if e.get("kind") == "ws-in"
                 and not str(e.get("data", "")).startswith(noisy)]
     if timeline:
-        start = timeline[0].get("t") or timeline[0].get("received") or 0
+        def when(e: dict) -> float:  # seconds; the browser's ms clock, else the receiver's
+            return e["t"] / 1000 if isinstance(e.get("t"), (int, float)) else e.get("received", 0)
+
+        start = when(timeline[0])
         out.append(f"\n== all incoming messages except {'/'.join(noisy)} ({len(timeline)}) ==")
         for e in timeline[:3000]:
-            t = (e.get("t") or e.get("received") or 0) - start
-            t = t / 1000 if t > 10_000_000 else t  # userscript timestamps are ms
+            t = when(e) - start
             out.append(f"  +{t:7.0f}s  {redact(str(e.get('data', '')))[:300]}")
     clocks = [e for e in events if e.get("kind") == "ws-in" and str(e.get("data", "")).startswith("CLOCK")]
     if clocks:
