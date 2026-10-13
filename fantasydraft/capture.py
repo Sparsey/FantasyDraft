@@ -118,6 +118,29 @@ def summarize(path: str | Path, samples: int = 3) -> str:
                 picks = msgs[:samples] if len(msgs) <= samples else [msgs[0], msgs[len(msgs) // 2], msgs[-1]]
                 out += ["  " + redact(m)[:400] for m in picks]
 
+    # Every incoming message in order, minus the high-volume clock/keep-alive
+    # chatter, so the full pick sequence and autodraft switches are visible.
+    noisy = ("CLOCK", "PONG", "PING")
+    timeline = [e for e in events if e.get("kind") == "ws-in"
+                and not str(e.get("data", "")).startswith(noisy)]
+    if timeline:
+        start = timeline[0].get("t") or timeline[0].get("received") or 0
+        out.append(f"\n== all incoming messages except {'/'.join(noisy)} ({len(timeline)}) ==")
+        for e in timeline[:3000]:
+            t = (e.get("t") or e.get("received") or 0) - start
+            t = t / 1000 if t > 10_000_000 else t  # userscript timestamps are ms
+            out.append(f"  +{t:7.0f}s  {redact(str(e.get('data', '')))[:300]}")
+    clocks = [e for e in events if e.get("kind") == "ws-in" and str(e.get("data", "")).startswith("CLOCK")]
+    if clocks:
+        out.append("\n== CLOCK messages: first of each new (team, last number) combination ==")
+        seen = set()
+        for e in clocks:
+            parts = str(e.get("data", "")).split()
+            key = (parts[1:2], parts[3:4])
+            if str(key) not in seen:
+                seen.add(str(key))
+                out.append("  " + redact(str(e.get("data", "")))[:120])
+
     urls = Counter(re.sub(r"\?.*", "", e.get("url", "")) for e in events if e.get("kind") in ("fetch", "ws-open"))
     if urls:
         out.append("\n== URLs ==")
