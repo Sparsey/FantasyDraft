@@ -6,6 +6,7 @@ import io
 import json
 import re
 import sys
+import unicodedata
 import urllib.request
 from pathlib import Path
 
@@ -148,6 +149,54 @@ def resolve_player(token: str, players: dict[str, Player]) -> str:
     if not partial:
         raise ValueError(f"no player matches {token!r}")
     raise ValueError(f"{token!r} is ambiguous: {[players[p].name for p in partial[:5]]}")
+
+
+_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
+
+
+def _norm(text: str) -> str:
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
+    words = re.sub(r"[^a-z0-9]+", " ", text).split()
+    return " ".join(w for w in words if w not in _SUFFIXES)
+
+
+def extract_picks(text: str, players: dict[str, Player]) -> tuple[list[str], list[str]]:
+    """Find players, in order, in text copied from a draft results page.
+
+    Matches full names and "F. Last" abbreviations (when unambiguous),
+    ignoring case, accents, punctuation and Jr./III suffixes. Several players
+    on one line are taken left to right. Returns (player ids, warnings).
+    """
+    keys: dict[str, set[str]] = {}
+    for pid, p in players.items():
+        full = _norm(p.name)
+        words = full.split()
+        for key in {full, f"{words[0][0]} {' '.join(words[1:])}"} if len(words) > 1 else {full}:
+            keys.setdefault(key, set()).add(pid)
+    unique = {k: next(iter(v)) for k, v in keys.items() if len(v) == 1}
+
+    picks: list[str] = []
+    warnings: list[str] = []
+    for line in text.splitlines():
+        hay = f" {_norm(line)} "
+        found: list[tuple[int, int, str]] = []
+        for key, pid in unique.items():
+            start = hay.find(f" {key} ")
+            while start != -1:
+                found.append((start, start + len(key) + 1, pid))
+                start = hay.find(f" {key} ", start + 1)
+        # Longest match wins where matches overlap ("Jalen Williams" vs "J. Williams").
+        found.sort(key=lambda m: (m[0], -(m[1] - m[0])))
+        end = -1
+        for start, stop, pid in found:
+            if start < end:
+                continue
+            end = stop
+            if pid in picks:
+                warnings.append(f"{players[pid].name} appears again (ignored): {line.strip()[:60]}")
+            else:
+                picks.append(pid)
+    return picks, warnings
 
 
 def load_picks(path: str | Path, players: dict[str, Player]) -> list[str]:

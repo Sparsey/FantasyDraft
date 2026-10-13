@@ -60,6 +60,7 @@ python -m fantasydraft watch --league examples/league.json
 | `watch` | re-run `recommend` whenever `picks.txt` or `league.json` changes |
 | `availability` | P(each top player survives to my next 3 picks) |
 | `analyze` | opponents' tendencies so far (autodraft? reaching? by points?) |
+| `import-picks` | build `picks.txt` from text copied off a draft results page (see [docs/MOCK_DRAFTS.md](docs/MOCK_DRAFTS.md)) |
 | `mock` | simulate a draft into `picks.txt` (prompts you on your turns unless `--auto-me`) |
 | `fetch-players`, `fetch-league`, `live` | ESPN integration |
 

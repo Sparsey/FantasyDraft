@@ -103,6 +103,28 @@ def cmd_availability(args) -> None:
     print(_table(rows, ["player", "pos", "proj", *(f"P(avail @#{m + 1})" for m in mine)]))
 
 
+def cmd_import_picks(args) -> None:
+    """Turn text copied from a draft results page into a picks file."""
+    from .io import extract_picks, load_players, players_source
+
+    players = load_players(args.players or players_source(args.league))
+    text = sys.stdin.read() if args.source == "-" else Path(args.source).read_text(encoding="utf-8")
+    picks, warnings = extract_picks(text, players)
+    for w in warnings:
+        print(f"warning: {w}", file=sys.stderr)
+    save_picks(picks, players, args.picks)
+    print(f"wrote {len(picks)} picks to {args.picks}")
+    try:
+        league = load_state(args.players, args.league, None).league
+        if len(picks) != league.total_picks:
+            print(f"note: {args.league} expects {league.total_picks} picks "
+                  f"({league.num_teams} teams x {league.rounds} rounds) — check for "
+                  "players missing from your list, or a different league size.")
+    except Exception:
+        pass
+    print("first picks: " + ", ".join(players[p].name for p in picks[:5]))
+
+
 def cmd_analyze(args) -> None:
     state = _state(args)
     rows = [
@@ -278,6 +300,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--sims", type=int, default=300)
     p.add_argument("--top", type=int, default=30)
     p.set_defaults(func=cmd_availability)
+
+    p = sub.add_parser("import-picks", help="build picks.txt from text copied off a draft results page")
+    p.add_argument("source", help="text file with the pasted results, or - for stdin")
+    files(p)
+    p.set_defaults(func=cmd_import_picks)
 
     p = sub.add_parser("analyze", help="opponents' draft tendencies so far")
     files(p)

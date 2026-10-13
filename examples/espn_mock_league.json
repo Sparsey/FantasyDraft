@@ -1,0 +1,58 @@
+{
+  "players": "PASTE-YOUR-GOOGLE-SHEET-LINK-HERE",
+  "my_team": "Me",
+  "bench_weight": 0.4,
+  "roster_slots": {
+    "PG": 1,
+    "SG": 1,
+    "SF": 1,
+    "PF": 1,
+    "C": 1,
+    "G": 1,
+    "F": 1,
+    "UTIL": 3,
+    "BE": 3
+  },
+  "teams": [
+    {
+      "name": "Bot 1",
+      "strategy": "auto"
+    },
+    {
+      "name": "Bot 2",
+      "strategy": "auto"
+    },
+    {
+      "name": "Bot 3",
+      "strategy": "auto"
+    },
+    {
+      "name": "Me",
+      "strategy": "adp"
+    },
+    {
+      "name": "Bot 5",
+      "strategy": "auto"
+    },
+    {
+      "name": "Bot 6",
+      "strategy": "auto"
+    },
+    {
+      "name": "Bot 7",
+      "strategy": "auto"
+    },
+    {
+      "name": "Bot 8",
+      "strategy": "auto"
+    },
+    {
+      "name": "Bot 9",
+      "strategy": "auto"
+    },
+    {
+      "name": "Bot 10",
+      "strategy": "auto"
+    }
+  ]
+}

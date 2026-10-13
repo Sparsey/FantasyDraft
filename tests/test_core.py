@@ -181,3 +181,23 @@ def test_league_id_accepts_url():
 
     assert _league_id("358709800") == 358709800
     assert _league_id("https://fantasy.espn.com/basketball/team?leagueId=358709800&seasonId=2027&teamId=4") == 358709800
+
+
+def test_extract_picks_from_pasted_results():
+    from fantasydraft.io import extract_picks
+
+    players = {p.id: p for p in [
+        P("Nikola Jokić", "C", 1), P("Jaren Jackson Jr.", "PF/C", 1), P("Jalen Williams", "SF", 1),
+        P("Jaylin Williams", "PF", 1), P("Shai Gilgeous-Alexander", "PG", 1), P("Anthony Davis", "PF/C", 1),
+    ]}
+    text = """Round 1
+    1. Team Bob - Nikola Jokic, Den C
+    2  S. Gilgeous-Alexander  OKC PG   (Team Al)
+    3 Jaren Jackson  MEM
+    R2: Jalen Williams OKC | Anthony Davis DAL
+    4 J. Williams    <- ambiguous, skipped
+    recently drafted: Nikola Jokic
+    """
+    picks, warnings = extract_picks(text, players)
+    assert picks == ["Nikola Jokić", "Shai Gilgeous-Alexander", "Jaren Jackson Jr.", "Jalen Williams", "Anthony Davis"]
+    assert len(warnings) == 1
