@@ -7,30 +7,51 @@ ESPN mock drafts are useful for two things:
 2. **Rehearsing the draft-day loop**: the `watch` screen updating while picks
    come in.
 
-Mock drafts aren't real leagues, so `live` can't follow them. Instead, copy
-the results off the page and run `import-picks`.
+Mock drafts aren't real leagues, so `live` can't follow them. Track them
+with the interactive `draft` command, or copy the results off the page
+afterwards and run `import-picks`.
 
 ## Setup
 
-Copy `examples/espn_mock_league.json` to `mock.json` and edit it to match the
-mock you join:
-- `players`: your Google Sheet link
-- the number of teams (one entry per team, in first-round order)
-- `my_team`: your draft position. Move the `"Me"` entry to that spot.
-- `roster_slots`: if the mock uses a different roster size
-
-## 1. Rehearse live (optional)
-
-Keep `picks.txt` open in an editor and type each pick as it happens. A name,
-or the first few unique letters of one, is enough per line. In another
-terminal, run:
+Create a league file for the mock. Run this once per mock, changing
+`--my-pick` to your draft position:
 
 ```bash
-python -m fantasydraft watch --league mock.json --picks picks.txt
+python -m fantasydraft new-league mock.json --teams 10 --my-pick 4 --players "<your Google Sheet link>"
 ```
 
-Each save refreshes the recommendations. Mock pick clocks are short, so
-dropping `--sims` to 40 helps if the screen lags behind.
+The other teams are saved with the `adp` strategy (`--strategy` changes it).
+Add `--names "A,B,C,..."` to use real team names, and `--force` to overwrite
+an existing `mock.json`. For a different roster size, edit `roster_slots` in
+the file.
+
+## 1. Track the mock live
+
+```bash
+python -m fantasydraft draft --league mock.json --picks picks.txt
+```
+
+Type each pick as it happens: a name, or the start of one (`jok` for Jokić
+if unique), records the next pick. Recommendations refresh after every entry.
+
+When someone switches autodraft on or off:
+
+```
+auto 3        # team at draft position 3 went on autodraft (a team name works too)
+back 3        # they're drafting themselves again
+```
+
+While a team is marked auto, the simulation has it take the best player by
+ESPN rank. `back` returns it to its saved strategy, which is never
+overwritten. Picks made while on auto are also left out of that team's
+`analyze` stats, so they don't distort how you read the manager.
+
+Other commands: `undo` (removes the last pick or switch), `teams` (who's on
+auto), Enter (refresh), `help`, `quit`. Everything is saved to `picks.txt`
+as you go, so you can quit and resume.
+
+Mock pick clocks are short. If recommendations lag, lower `--sims`
+(default 60; try 30).
 
 ## 2. Analyse the finished mock
 
@@ -38,7 +59,7 @@ dropping `--sims` to 40 helps if the screen lags behind.
    copy it, and paste it into a text file (say `mock1.txt`). Extra text like
    teams, positions and pick numbers is fine; player names are found in the
    text, and `F. Last` abbreviations work when unambiguous.
-2. Import and analyse:
+2. Import and analyse (skip the import if you tracked the mock with `draft`):
 
    ```bash
    python -m fantasydraft import-picks mock1.txt --league mock.json --picks mock1_picks.txt

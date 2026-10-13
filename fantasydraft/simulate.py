@@ -26,7 +26,7 @@ class Simulator:
         self.state = state
         self.league = state.league
         self.slots = self.league.starting_slots
-        strategies = {t.strategy for t in self.league.teams} | {"points"}
+        strategies = {t.strategy for t in self.league.teams} | {"points", "auto"}
         players = list(state.players.values())
         self.orders = {s: order_for(s, players) for s in strategies}
 
@@ -85,7 +85,7 @@ class Simulator:
                 forced = None
                 my_roster.append(choice)
             else:
-                profile = league.teams[team]
+                profile = self.state.profile(team)
                 ordered = self.top_untaken(profile.strategy, taken, CANDIDATE_POOL)
                 choice = choose_pick(profile, ordered, rng, pick)
                 taken_at[choice.id] = pick

@@ -48,7 +48,9 @@ python -m fantasydraft watch --league examples/league.json
    python -m fantasydraft live  --league-id 12345 --season 2027   # ESPN -> picks.txt
    python -m fantasydraft watch                                   # picks.txt -> recommendations
    ```
-   If the ESPN feed breaks, type picks into `picks.txt` yourself (one name or
+   `live` also marks teams as on/off autodraft from ESPN's per-pick flag
+   (written as `@auto` / `@back` lines). If the ESPN feed breaks, switch to
+   `python -m fantasydraft draft` and type picks there, or type them into `picks.txt` yourself (one name or
    id per line, unique name prefixes are fine) — `watch` doesn't care where
    they come from.
 
@@ -56,6 +58,8 @@ python -m fantasydraft watch --league examples/league.json
 
 | command | what it does |
 |---|---|
+| `draft` | interactive tracker: type picks and `auto`/`back` switches, recommendations after each |
+| `new-league` | create a league file (e.g. `mock.json` for an ESPN mock) |
 | `recommend` | rank options for my next pick (one-shot) |
 | `watch` | re-run `recommend` whenever `picks.txt` or `league.json` changes |
 | `availability` | P(each top player survives to my next 3 picks) |

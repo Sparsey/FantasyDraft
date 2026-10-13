@@ -199,20 +199,93 @@ def extract_picks(text: str, players: dict[str, Player]) -> tuple[list[str], lis
     return picks, warnings
 
 
-def load_picks(path: str | Path, players: dict[str, Player]) -> list[str]:
-    """Picks file: one player (id or name) per line, in draft order. '#' comments allowed."""
+# A picks file is a draft log: one pick per line (player id, name or unique
+# name prefix), plus optional autodraft switches:
+#   @auto <team>    team went on autodraft
+#   @back <team>    team is drafting themselves again (also: @manual)
+# <team> is a team name (or unique prefix) or 1-based draft position.
+# '#' starts a comment.
+
+AUTO_ON = ("@auto",)
+AUTO_OFF = ("@back", "@manual")
+
+
+def resolve_team(token: str, league: League) -> int:
+    token = token.strip()
+    if token.isdigit():
+        slot = int(token) - 1
+        if 0 <= slot < league.num_teams:
+            return slot
+        raise ValueError(f"no draft position {token} (1-{league.num_teams})")
+    low = token.lower()
+    names = [t.name.lower() for t in league.teams]
+    if low in names:
+        return names.index(low)
+    partial = [i for i, n in enumerate(names) if n.startswith(low)]
+    if len(partial) == 1:
+        return partial[0]
+    if not partial:
+        raise ValueError(f"no team matches {token!r}")
+    raise ValueError(f"{token!r} is ambiguous: {[league.teams[i].name for i in partial]}")
+
+
+def load_log(path: str | Path, players: dict[str, Player], league: League | None = None) -> list[tuple]:
+    """Read a picks file into entries: ("pick", player_id) or ("auto", team, on)."""
     p = Path(path)
     if not p.exists():
         return []
-    picks: list[str] = []
-    for line in p.read_text(encoding="utf-8").splitlines():
-        line = line.split("#", 1)[0].strip()
-        if line:
+    entries: list[tuple] = []
+    seen: set[str] = set()
+    for n, raw in enumerate(p.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        try:
+            if line.startswith("@"):
+                cmd, _, team = line.partition(" ")
+                cmd = cmd.lower()
+                if cmd not in AUTO_ON + AUTO_OFF:
+                    raise ValueError(f"unknown command {cmd!r} (use @auto / @back)")
+                if league is not None:
+                    entries.append(("auto", resolve_team(team, league), cmd in AUTO_ON))
+                continue
             pid = resolve_player(line, players)
-            if pid in picks:
-                raise ValueError(f"{players[pid].name} picked twice")
-            picks.append(pid)
-    return picks
+        except ValueError as e:
+            raise ValueError(f"{path} line {n}: {e}") from None
+        if pid in seen:
+            raise ValueError(f"{path} line {n}: {players[pid].name} picked twice")
+        seen.add(pid)
+        entries.append(("pick", pid))
+    return entries
+
+
+def save_log(entries: list[tuple], players: dict[str, Player], league: League, path: str | Path) -> None:
+    lines = []
+    for e in entries:
+        if e[0] == "pick":
+            lines.append(f"{e[1]}  # {players[e[1]].name}")
+        else:
+            lines.append(f"{'@auto' if e[2] else '@back'} {league.teams[e[1]].name}")
+    Path(path).write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
+
+
+def apply_log(state: DraftState, entries: list[tuple]) -> None:
+    """Replay log entries onto a state (picks, who is on auto, which picks were auto)."""
+    for e in entries:
+        if e[0] == "pick":
+            team = state.league.team_for_pick(len(state.picks))
+            if team in state.auto_teams:
+                state.auto_picks.add(len(state.picks))
+            state.picks.append(e[1])
+        elif e[2]:
+            state.auto_teams.add(e[1])
+        else:
+            state.auto_teams.discard(e[1])
+
+
+def load_picks(path: str | Path, players: dict[str, Player]) -> list[str]:
+    """Just the picks from a picks file, in order."""
+    return [e[1] for e in load_log(path, players) if e[0] == "pick"]
 
 
 def save_picks(picks: list[str], players: dict[str, Player], path: str | Path) -> None:
@@ -229,7 +302,9 @@ def players_source(league_path: str | Path) -> str:
 def load_state(players_path: str | Path | None, league_path: str | Path, picks_path: str | Path | None) -> DraftState:
     players = load_players(players_path or players_source(league_path))
     league = load_league(league_path)
-    picks = load_picks(picks_path, players) if picks_path else []
-    if len(picks) > league.total_picks:
+    state = DraftState(league=league, players=players)
+    if picks_path:
+        apply_log(state, load_log(picks_path, players, league))
+    if len(state.picks) > league.total_picks:
         raise ValueError("more picks than the draft has")
-    return DraftState(league=league, players=players, picks=picks)
+    return state

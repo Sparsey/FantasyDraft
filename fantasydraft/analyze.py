@@ -12,7 +12,8 @@ from .models import DraftState
 @dataclass
 class TeamTendency:
     team: str
-    picks: int
+    picks: int  # picks made by the team itself (not while on autodraft)
+    auto_picks: int
     top_rank_rate: float  # share of picks that were the best available ESPN rank
     reach_vs_adp: float  # mean (ADP - pick#): positive = reaches early
     reach_vs_rank: float  # mean (ESPN rank - pick#)
@@ -26,9 +27,15 @@ def analyze(state: DraftState) -> list[TeamTendency]:
     per_team: dict[int, dict[str, list[float]]] = {
         t: {"top_rank": [], "adp": [], "rank": [], "top_pts": []} for t in range(league.num_teams)
     }
+    auto_counts = [0] * league.num_teams
     for pick, pid in enumerate(state.picks):
         team = league.team_for_pick(pick)
         p = state.players[pid]
+        if pick in state.auto_picks:
+            # Autodraft picks say nothing about how the manager drafts.
+            auto_counts[team] += 1
+            taken.add(pid)
+            continue
         avail = [q for q in state.players.values() if q.id not in taken]
         best_rank = min(avail, key=lambda q: base_key("rank", q))
         best_pts = max(avail, key=lambda q: q.proj_points)
@@ -58,5 +65,5 @@ def analyze(state: DraftState) -> list[TeamTendency]:
             suggested = "rank"
         else:
             suggested = "adp"
-        out.append(TeamTendency(league.teams[t].name, n, top_rank, adp, rank, top_pts, suggested))
+        out.append(TeamTendency(league.teams[t].name, n, auto_counts[t], top_rank, adp, rank, top_pts, suggested))
     return out

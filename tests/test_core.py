@@ -201,3 +201,40 @@ def test_extract_picks_from_pasted_results():
     picks, warnings = extract_picks(text, players)
     assert picks == ["Nikola Jokić", "Shai Gilgeous-Alexander", "Jaren Jackson Jr.", "Jalen Williams", "Anthony Davis"]
     assert len(warnings) == 1
+
+
+def test_autodraft_switches_keep_saved_strategy(tmp_path):
+    from fantasydraft.io import apply_log, load_log
+
+    state = _tiny_state(["adp", "points"])
+    log = tmp_path / "picks.txt"
+    log.write_text("pg1\n@auto T1\nc1\npg2\n@back 2\n")
+    entries = load_log(log, state.players, state.league)
+    apply_log(state, entries)
+    assert state.picks == ["pg1", "c1", "pg2"]
+    assert state.auto_picks == {1, 2}  # T1 picked twice while on auto (snake: 0,1,1,0)
+    assert state.auto_teams == set()
+    assert state.profile(1).strategy == "points"  # saved strategy restored
+
+    state.auto_teams.add(1)
+    assert state.profile(1).strategy == "auto"
+    assert state.league.teams[1].strategy == "points"  # never overwritten
+
+
+def test_simulation_uses_auto_while_flagged():
+    state = _tiny_state(["points", "points"], my=0)
+    state.picks = ["pg1"]
+    state.auto_teams = {1}
+    # On auto, T1 takes the best ESPN rank (c1) even with noise, every time.
+    for seed in range(5):
+        result = Simulator(state).run(random.Random(seed))
+        assert result.taken_at["c1"] == 1
+
+
+def test_analyze_skips_autodraft_picks():
+    state = _tiny_state(["adp", "adp"])
+    state.picks = ["pg1", "c1", "pg2", "c2"]
+    state.auto_picks = {1, 2}
+    t = analyze(state)
+    assert (t[1].picks, t[1].auto_picks) == (0, 2)
+    assert (t[0].picks, t[0].auto_picks) == (2, 0)

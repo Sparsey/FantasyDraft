@@ -118,6 +118,17 @@ class DraftState:
     league: League
     players: dict[str, Player]
     picks: list[str] = field(default_factory=list)  # player ids in pick order
+    # Teams currently on autodraft (temporary; their saved strategy is kept
+    # in League.teams and used again once they're switched back).
+    auto_teams: set[int] = field(default_factory=set)
+    # Indices into `picks` that were made while the picking team was on auto.
+    auto_picks: set[int] = field(default_factory=set)
+
+    def profile(self, team: int) -> TeamProfile:
+        base = self.league.teams[team]
+        if team in self.auto_teams:
+            return TeamProfile(base.name, "auto")
+        return base
 
     @property
     def current_pick(self) -> int:

@@ -1,11 +1,14 @@
 """Command line interface.
 
-Typical draft-day setup (two terminals):
+Typing picks yourself (ESPN mock drafts, or if the ESPN feed breaks):
 
-    python -m fantasydraft live  --league-id 123 --season 2027 ...   # ESPN -> picks.txt
-    python -m fantasydraft watch --players data/players.csv --league league.json --picks picks.txt
+    python -m fantasydraft draft --league mock.json --picks picks.txt
 
-`watch` also works with a hand-edited picks.txt if the ESPN feed breaks, and
+Following a real ESPN league automatically (two terminals):
+
+    python -m fantasydraft live  --league-id 123 --season 2027   # ESPN -> picks.txt
+    python -m fantasydraft watch --league league.json --picks picks.txt
+
 `mock` writes a fake draft into picks.txt to rehearse the whole loop.
 """
 from __future__ import annotations
@@ -20,7 +23,7 @@ from pathlib import Path
 
 from .analyze import analyze
 from .drafters import CANDIDATE_POOL, choose_pick
-from .io import load_picks, load_state, save_picks, save_players
+from .io import load_log, load_picks, load_state, resolve_player, resolve_team, save_log, save_picks, save_players
 from .models import DraftState
 from .recommend import recommend
 from .simulate import Simulator, availability
@@ -51,7 +54,9 @@ def _status(state: DraftState) -> str:
     if until == 0:
         lines.append(">>> YOU ARE ON THE CLOCK <<<")
     elif until is not None:
-        lines.append(f"Your next pick: #{mine[0] + 1} ({until} picks away)")
+        lines.append(f"Your next pick: #{mine[0] + 1} ({until} pick{'s' if until != 1 else ''} away)")
+    if state.auto_teams:
+        lines.append("On autodraft: " + ", ".join(league.teams[t].name for t in sorted(state.auto_teams)))
     roster = state.rosters()[league.my_slot]
     if roster:
         lines.append("Your roster: " + ", ".join(f"{p.name} ({'/'.join(sorted(p.positions))})" for p in roster))
@@ -128,13 +133,127 @@ def cmd_import_picks(args) -> None:
 def cmd_analyze(args) -> None:
     state = _state(args)
     rows = [
-        [t.team, t.picks, f"{t.top_rank_rate:.0%}", f"{t.top_points_rate:.0%}",
+        [t.team, t.picks, t.auto_picks or "", f"{t.top_rank_rate:.0%}", f"{t.top_points_rate:.0%}",
          f"{t.reach_vs_adp:+.1f}", f"{t.reach_vs_rank:+.1f}", t.suggested]
         for t in analyze(state)
     ]
-    print(_table(rows, ["team", "picks", "took top ESPN rank", "took top proj",
+    print(_table(rows, ["team", "own picks", "auto picks", "took top ESPN rank", "took top proj",
                         "ADP - pick", "rank - pick", "suggested strategy"]))
     print("\n'ADP - pick' > 0 means the team takes players earlier than ADP (reaches).")
+    print("Picks made while a team was marked @auto are left out of its stats.")
+
+
+DRAFT_HELP = """Type a player (name, start of a name, or id) to record the next pick.
+  auto <team>   team went on autodraft     (team = name, start of name, or draft position)
+  back <team>   team is drafting themselves again (their saved strategy is used)
+  undo          remove the last entry
+  teams         show teams, strategies and who is on auto
+  <Enter>       refresh recommendations
+  help, quit"""
+
+
+def _teams_table(state: DraftState) -> str:
+    league = state.league
+    rows = [
+        [i + 1, t.name + (" (you)" if i == league.my_slot else ""), t.strategy,
+         "ON AUTO" if i in state.auto_teams else ""]
+        for i, t in enumerate(league.teams)
+    ]
+    return _table(rows, ["#", "team", "saved strategy", "now"])
+
+
+def cmd_draft(args) -> None:
+    """Interactive draft tracker: type picks and autodraft switches, get recommendations."""
+    message = "Type 'help' for commands."
+    show_recs = True
+    while True:
+        try:
+            state = _state(args)
+            entries = load_log(args.picks, state.players, state.league)
+        except Exception as e:
+            print(f"error reading files: {e}")
+            if input("fix the file and press Enter (or 'quit'): ").strip().lower() in ("q", "quit"):
+                return
+            continue
+        print("\n" + "=" * 72)
+        if show_recs:
+            _print_recommendations(state, args)
+        else:
+            print(_status(state))
+        show_recs = True
+        print(f"\n{message}")
+        try:
+            line = input("> ").strip()
+        except EOFError:
+            return
+        cmd, _, rest = line.partition(" ")
+        cmd = cmd.lower()
+        try:
+            if not line:
+                message = "Refreshed."
+            elif cmd in ("q", "quit", "exit"):
+                return
+            elif cmd in ("h", "help", "?"):
+                message, show_recs = DRAFT_HELP, False
+            elif cmd == "teams":
+                message, show_recs = _teams_table(state), False
+            elif cmd == "undo":
+                if not entries:
+                    message = "Nothing to undo."
+                else:
+                    last = entries.pop()
+                    save_log(entries, state.players, state.league, args.picks)
+                    what = state.players[last[1]].name if last[0] == "pick" else \
+                        f"{'auto' if last[2] else 'back'} {state.league.teams[last[1]].name}"
+                    message = f"Undid: {what}"
+            elif cmd in ("auto", "back", "manual") and rest:
+                team = resolve_team(rest, state.league)
+                on = cmd == "auto"
+                entries.append(("auto", team, on))
+                save_log(entries, state.players, state.league, args.picks)
+                name = state.league.teams[team].name
+                message = (f"{name} is on autodraft." if on else
+                           f"{name} is back (strategy: {state.league.teams[team].strategy}).")
+            else:
+                if state.is_complete:
+                    raise ValueError("the draft is already complete")
+                pid = resolve_player(line, state.players)
+                if pid in state.picks:
+                    raise ValueError(f"{state.players[pid].name} is already drafted")
+                team = state.league.teams[state.league.team_for_pick(state.current_pick)].name
+                entries.append(("pick", pid))
+                save_log(entries, state.players, state.league, args.picks)
+                message = f"#{state.current_pick + 1} {team}: {state.players[pid].name}"
+        except ValueError as e:
+            message = f"!! {e}"
+
+
+def cmd_new_league(args) -> None:
+    """Write a league file for a draft (e.g. an ESPN mock) without editing JSON."""
+    out = Path(args.out)
+    if out.exists() and not args.force:
+        sys.exit(f"{out} already exists (use --force to overwrite)")
+    if not 1 <= args.my_pick <= args.teams:
+        sys.exit(f"--my-pick must be between 1 and {args.teams}")
+    names = [n.strip() for n in args.names.split(",")] if args.names else []
+    if names and len(names) != args.teams:
+        sys.exit(f"--names has {len(names)} names but --teams is {args.teams}")
+    teams = []
+    for i in range(args.teams):
+        if i == args.my_pick - 1:
+            teams.append({"name": names[i] if names else "Me", "strategy": "adp"})
+        else:
+            teams.append({"name": names[i] if names else f"Team {i + 1}",
+                          "strategy": args.strategy, "noise": args.noise})
+    cfg = {
+        "players": args.players or "data/players.csv",
+        "my_team": args.my_pick,
+        "bench_weight": 0.4,
+        "roster_slots": {"PG": 1, "SG": 1, "SF": 1, "PF": 1, "C": 1, "G": 1, "F": 1, "UTIL": 3, "BE": 3},
+        "teams": teams,
+    }
+    out.write_text(json.dumps(cfg, indent=2) + "\n")
+    print(f"wrote {out}: {args.teams} teams, you pick #{args.my_pick}, others '{args.strategy}'")
 
 
 def cmd_watch(args) -> None:
@@ -246,11 +365,21 @@ def cmd_live(args) -> None:
                 unknown = [p.player_id for p in picks if p.player_id not in state.players]
                 if unknown:
                     print(f"warning: {len(unknown)} drafted players missing from the players list: {unknown[:5]}")
-                ids = [p.player_id for p in picks if p.player_id in state.players]
-                save_picks(ids, state.players, args.picks)
-                names = client.team_names(data)
-                auto_teams = sorted({names.get(p.team_id, str(p.team_id)) for p in picks if p.auto})
-                print(f"{len(picks)} picks synced" + (f"; autodraft picks by: {', '.join(auto_teams)}" if auto_teams else ""))
+                # Mirror ESPN's per-pick autodraft flag as @auto/@back switches.
+                slot_of = {tid: i for i, tid in enumerate(client.pick_order(data))}
+                entries: list[tuple] = []
+                on_auto: set[int] = set()
+                for p in picks:
+                    if p.player_id not in state.players:
+                        continue
+                    slot = slot_of.get(p.team_id)
+                    if slot is not None and p.auto != (slot in on_auto):
+                        entries.append(("auto", slot, p.auto))
+                        (on_auto.add if p.auto else on_auto.discard)(slot)
+                    entries.append(("pick", p.player_id))
+                save_log(entries, state.players, state.league, args.picks)
+                names = [state.league.teams[i].name for i in sorted(on_auto)]
+                print(f"{len(picks)} picks synced" + (f"; on autodraft at their last pick: {', '.join(names)}" if names else ""))
         except Exception as e:
             print(f"error: {e}", file=sys.stderr)
         time.sleep(args.interval)
@@ -309,6 +438,24 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("analyze", help="opponents' draft tendencies so far")
     files(p)
     p.set_defaults(func=cmd_analyze)
+
+    p = sub.add_parser("draft", help="interactive tracker: type picks and autodraft switches, see recommendations")
+    files(p)
+    p.add_argument("--sims", type=int, default=60, help="Monte Carlo runs per candidate (lower = faster)")
+    p.add_argument("--candidates", type=int, default=8)
+    p.set_defaults(func=cmd_draft)
+
+    p = sub.add_parser("new-league", help="create a league file (e.g. for an ESPN mock draft)")
+    p.add_argument("out", nargs="?", default="mock.json")
+    p.add_argument("--teams", type=int, default=10)
+    p.add_argument("--my-pick", type=int, required=True, help="your draft position (1 = first)")
+    p.add_argument("--players", help="players CSV or Google Sheets link")
+    p.add_argument("--names", help="comma-separated team names in draft order")
+    p.add_argument("--strategy", default="adp", choices=["auto", "adp", "rank", "points"],
+                   help="saved strategy for the other teams")
+    p.add_argument("--noise", type=float, default=0.2)
+    p.add_argument("--force", action="store_true")
+    p.set_defaults(func=cmd_new_league)
 
     p = sub.add_parser("watch", help="re-run recommendations whenever the picks file changes")
     files(p), sim(p)
