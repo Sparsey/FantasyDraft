@@ -12,6 +12,10 @@ plus notes on the open questions.
     has **not yet been run against a live league** (the dev sandbox can't
     reach ESPN), so run it once early and check the output. Use `--dump` to
     save the raw JSON if something looks off.
+  - ✅ Or keep the list in a **Google Sheet** (`sheets/`): an on-demand
+    *Update players from ESPN* menu refreshes ESPN columns only, and your
+    `my_proj` / `ignore` / notes columns are left alone. The program reads
+    the sheet from its share link.
   - The CSV is plain columns (`id,name,positions,nba_team,proj_points,espn_rank,adp`),
     so you can round-trip it through Google Sheets, override projections, or
     merge in other rankings.

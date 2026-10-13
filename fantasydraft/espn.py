@@ -25,6 +25,14 @@ SLOT_IDS = {
     0: "PG", 1: "SG", 2: "SF", 3: "PF", 4: "C", 5: "G", 6: "F", 7: "SG/SF",
     8: "G/F", 9: "PF/C", 10: "F/C", 11: "UTIL", 12: "BE", 13: "IR",
 }
+# proTeamId -> NBA team abbreviation (0 = free agent).
+NBA_TEAMS = {
+    0: "FA", 1: "ATL", 2: "BOS", 3: "NOP", 4: "CHI", 5: "CLE", 6: "DAL", 7: "DEN",
+    8: "DET", 9: "GSW", 10: "HOU", 11: "IND", 12: "LAC", 13: "LAL", 14: "MIA",
+    15: "MIL", 16: "MIN", 17: "BKN", 18: "NYK", 19: "ORL", 20: "PHI", 21: "PHX",
+    22: "POR", 23: "SAC", 24: "SAS", 25: "OKC", 26: "UTA", 27: "WAS", 28: "TOR",
+    29: "MEM", 30: "CHA",
+}
 PROJECTED = 1  # statSourceId
 SEASON_SPLIT = 0  # statSplitTypeId
 
@@ -142,5 +150,5 @@ def parse_player(raw: dict, season: int, rank_type: str = "STANDARD") -> Player 
         proj_points=proj,
         espn_rank=float(rank) if rank else float("inf"),
         adp=float(adp) if adp else float("inf"),
-        nba_team=str(info.get("proTeamId", "")),
+        nba_team=NBA_TEAMS.get(info.get("proTeamId"), str(info.get("proTeamId", ""))),
     )

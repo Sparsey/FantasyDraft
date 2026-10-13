@@ -182,6 +182,7 @@ def cmd_fetch_league(args) -> None:
     existing = json.loads(out.read_text()) if out.exists() else {}
     old = {t["name"]: t for t in existing.get("teams", [])}
     cfg = {
+        "players": existing.get("players", "data/players.csv"),
         "my_team": existing.get("my_team", 1),
         "bench_weight": existing.get("bench_weight", 0.4),
         "roster_slots": client.roster_slots(data),
@@ -208,7 +209,7 @@ def cmd_live(args) -> None:
                 state = _state(args)
                 unknown = [p.player_id for p in picks if p.player_id not in state.players]
                 if unknown:
-                    print(f"warning: {len(unknown)} drafted players missing from {args.players}: {unknown[:5]}")
+                    print(f"warning: {len(unknown)} drafted players missing from the players list: {unknown[:5]}")
                 ids = [p.player_id for p in picks if p.player_id in state.players]
                 save_picks(ids, state.players, args.picks)
                 names = client.team_names(data)
@@ -224,8 +225,10 @@ def main(argv: list[str] | None = None) -> None:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    players_help = "players CSV or Google Sheets link (default: league.json's \"players\", else data/players.csv)"
+
     def files(p):
-        p.add_argument("--players", default="data/players.csv")
+        p.add_argument("--players", help=players_help)
         p.add_argument("--league", default="league.json")
         p.add_argument("--picks", default="picks.txt")
         p.add_argument("--seed", type=int, default=0)
@@ -281,7 +284,7 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("live", help="mirror the live ESPN draft into the picks file")
     espn(p)
-    p.add_argument("--players", default="data/players.csv")
+    p.add_argument("--players", help=players_help)
     p.add_argument("--league", default="league.json")
     p.add_argument("--picks", default="picks.txt")
     p.add_argument("--interval", type=float, default=3.0)

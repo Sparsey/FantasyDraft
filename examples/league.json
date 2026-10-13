@@ -1,17 +1,68 @@
 {
+  "players": "data/sample_players.csv",
   "my_team": "Me",
   "bench_weight": 0.4,
-  "roster_slots": {"PG": 1, "SG": 1, "SF": 1, "PF": 1, "C": 1, "G": 1, "F": 1, "UTIL": 3, "BE": 3},
+  "roster_slots": {
+    "PG": 1,
+    "SG": 1,
+    "SF": 1,
+    "PF": 1,
+    "C": 1,
+    "G": 1,
+    "F": 1,
+    "UTIL": 3,
+    "BE": 3
+  },
   "teams": [
-    {"name": "Alice", "strategy": "auto"},
-    {"name": "Bob", "strategy": "adp", "noise": 0.15},
-    {"name": "Carol", "strategy": "points", "noise": 0.10},
-    {"name": "Me", "strategy": "adp"},
-    {"name": "Dave", "strategy": "rank", "noise": 0.20, "favorites": {"Player 020": 12}},
-    {"name": "Erin", "strategy": "adp", "noise": 0.30},
-    {"name": "Frank", "strategy": "auto"},
-    {"name": "Grace", "strategy": "adp", "noise": 0.15},
-    {"name": "Heidi", "strategy": "adp", "noise": 0.15},
-    {"name": "Ivan", "strategy": "points", "noise": 0.15}
+    {
+      "name": "Alice",
+      "strategy": "auto"
+    },
+    {
+      "name": "Bob",
+      "strategy": "adp",
+      "noise": 0.15
+    },
+    {
+      "name": "Carol",
+      "strategy": "points",
+      "noise": 0.1
+    },
+    {
+      "name": "Me",
+      "strategy": "adp"
+    },
+    {
+      "name": "Dave",
+      "strategy": "rank",
+      "noise": 0.2,
+      "favorites": {
+        "Player 020": 12
+      }
+    },
+    {
+      "name": "Erin",
+      "strategy": "adp",
+      "noise": 0.3
+    },
+    {
+      "name": "Frank",
+      "strategy": "auto"
+    },
+    {
+      "name": "Grace",
+      "strategy": "adp",
+      "noise": 0.15
+    },
+    {
+      "name": "Heidi",
+      "strategy": "adp",
+      "noise": 0.15
+    },
+    {
+      "name": "Ivan",
+      "strategy": "points",
+      "noise": 0.15
+    }
   ]
 }

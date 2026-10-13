@@ -11,22 +11,26 @@ See [docs/PLAN.md](docs/PLAN.md) for the roadmap and design notes.
 
 ```bash
 # rehearse: fake draft writes picks.txt while `watch` updates recommendations
-python -m fantasydraft mock  --players data/sample_players.csv --league examples/league.json --delay 3 &
-python -m fantasydraft watch --players data/sample_players.csv --league examples/league.json
+python -m fantasydraft mock  --league examples/league.json --delay 3 &
+python -m fantasydraft watch --league examples/league.json
 ```
 
 `data/sample_players.csv` is synthetic (`examples/make_sample_players.py`).
 
 ## Real draft
 
-1. **Players** — download ESPN ranks, ADP and projected points (scored with
-   your league's settings):
-   ```bash
-   export ESPN_S2=... ESPN_SWID='{...}'   # private leagues: cookies from espn.com
-   python -m fantasydraft fetch-players --league-id 12345 --season 2027
-   ```
-   Edit `data/players.csv` freely (e.g. in Google Sheets) — only the columns
-   matter.
+1. **Players**: either
+   - **Google Sheet (recommended):** follow [sheets/README.md](sheets/README.md).
+     The sheet gets a *Draft Tools → Update players from ESPN* menu that runs
+     only when you click it, and you can add your own `my_proj` overrides,
+     `ignore` flags and notes. Then put the sheet link in `league.json` as
+     `"players"` (or pass `--players <link>`).
+   - **Local CSV:** download ESPN ranks, ADP and projected points (scored
+     with your league's settings):
+     ```bash
+     export ESPN_S2=... ESPN_SWID='{...}'   # private leagues: cookies from espn.com
+     python -m fantasydraft fetch-players --league-id 12345 --season 2027
+     ```
 2. **League** — `python -m fantasydraft fetch-league --league-id 12345 --season 2027`
    writes `league.json` with draft order and roster slots. Then set
    `my_team` and each team's profile:
@@ -37,6 +41,7 @@ python -m fantasydraft watch --players data/sample_players.csv --league examples
    | `noise` | how unpredictable they are (0.15 ≈ ±15% of draft slot) |
    | `favorites` | `{"Player Name": 10}` → takes that player ~10 spots early |
    | `bench_weight` | how much bench points count vs starters (league-wide) |
+   | `players` | players CSV path or Google Sheets link (league-wide) |
 
 3. **Draft day** — in two terminals:
    ```bash
@@ -77,6 +82,7 @@ python -m fantasydraft watch --players data/sample_players.csv --league examples
 - `simulate.py` — plays out the rest of the draft; availability odds.
 - `recommend.py` — evaluates candidates on common random seeds.
 - `analyze.py` — infers opponent strategies from actual picks.
+- `sheets/espn_update.gs` — Apps Script behind the sheet's update menu.
 - `espn.py` — ESPN's unofficial `lm-api-reads.fantasy.espn.com` API
   (untested against a live league so far).
 

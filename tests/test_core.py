@@ -148,3 +148,29 @@ def test_parse_espn_player_and_picks():
     ]}}
     picks = EspnClient.picks(league)
     assert [(p.player_id, p.auto) for p in picks] == [("8", False), ("9", True)]
+
+
+def test_sheet_links_become_csv_exports():
+    from fantasydraft.io import sheet_csv_url
+
+    base = "https://docs.google.com/spreadsheets/d/AbC-123_x"
+    assert sheet_csv_url(base + "/edit?gid=0#gid=0") == base + "/export?format=csv&gid=0"
+    assert sheet_csv_url(base + "/edit#gid=42") == base + "/export?format=csv&gid=42"
+    assert sheet_csv_url(base + "/edit") == base + "/export?format=csv"
+    assert sheet_csv_url("https://example.com/p.csv") == "https://example.com/p.csv"
+
+
+def test_my_proj_and_ignore_columns(tmp_path):
+    f = tmp_path / "p.csv"
+    f.write_text(
+        "id,name,positions,proj_points,espn_rank,adp,my_proj,ignore,notes\n"
+        '1,A,PG,"1,500.5",1,2,,,\n'
+        "2,B,C,1400,2,1,1600,,sleeper\n"
+        "3,C,SF,1300,3,3,,x,hurt\n"
+        "4,D,SF,,,,,,no projection yet\n"
+        ",,,,,,,,\n"
+    )
+    players = load_players(f)
+    assert set(players) == {"1", "2"}
+    assert players["1"].proj_points == 1500.5
+    assert players["2"].proj_points == 1600
