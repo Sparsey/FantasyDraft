@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FantasyDraft — ESPN draft room capture
 // @namespace    fantasydraft
-// @version      0.2
+// @version      0.3
 // @description  Forwards ESPN draft-room traffic and page text to the local FantasyDraft capture server.
 // @match        https://*.espn.com/*
 // @run-at       document-start
@@ -104,10 +104,13 @@
     });
   };
 
-  // 3. Page text every 10 s, as a fallback source for picks and autodraft status.
-  setInterval(function () {
+  // 3. Page text every 10 s (and soon after load), used to resync when you
+  //    join a draft that's already under way.
+  function snapshot() {
     if (document.body) record('dom-text', {data: document.body.innerText.slice(0, 300000)});
-  }, 10000);
+  }
+  setTimeout(snapshot, 4000);
+  setInterval(snapshot, 10000);
 
   record('hello', {url: location.href, ua: navigator.userAgent});
 })();

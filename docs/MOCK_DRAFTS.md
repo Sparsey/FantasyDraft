@@ -7,9 +7,12 @@ ESPN mock drafts are useful for two things:
 2. **Rehearsing the draft-day loop**: the `watch` screen updating while picks
    come in.
 
-Mock drafts aren't real leagues, so `live` can't follow them. Track them
-with the interactive `draft` command, or copy the results off the page
-afterwards and run `import-picks`.
+**Easiest: follow the draft room automatically.** See
+[browser/README.md](../browser/README.md). Two terminals (`room` + `watch`),
+nothing to type.
+
+Without the userscript, track mocks with the interactive `draft` command
+below, or copy the results off the page afterwards and run `import-picks`.
 
 ## Setup
 
@@ -55,9 +58,6 @@ as you go, so you can quit and resume.
 
 Mock pick clocks are short. If recommendations lag, lower `--sims`
 (default 60; try 30).
-
-**Help automate this:** while you do a mock, you can also record the
-draft page's live feed. See [browser/README.md](../browser/README.md).
 
 ## 2. Analyse the finished mock
 

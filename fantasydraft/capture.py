@@ -9,14 +9,21 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
-def serve(out: str | Path, port: int = 8765) -> None:
+def serve(out: str | Path, port: int = 8765, on_event=None, quiet: bool = False) -> None:
+    """Receive events from the userscript and append them to `out`.
+
+    on_event: optional callback for each event (used by `room` to follow the draft).
+    quiet: don't echo events to the terminal.
+    """
     out_path = Path(out)
+    lock = threading.Lock()
     counts: Counter[str] = Counter()
 
     class Handler(BaseHTTPRequestHandler):
@@ -51,12 +58,19 @@ def serve(out: str | Path, port: int = 8765) -> None:
                 self.end_headers()
                 return
             now = time.time()
-            with out_path.open("a", encoding="utf-8") as f:
+            with lock, out_path.open("a", encoding="utf-8") as f:
                 for e in events:
                     e["received"] = now
                     f.write(json.dumps(e) + "\n")
                     counts[e.get("kind", "?")] += 1
                     kind = e.get("kind", "?")
+                    if on_event is not None:
+                        try:
+                            on_event(e)
+                        except Exception as err:  # never let a parsing bug drop the capture
+                            print(f"!! error handling {kind}: {err}")
+                    if quiet:
+                        continue
                     if kind == "ws-in":
                         print(f"  ws  {str(e.get('data'))[:110]}")
                     elif kind in ("hello", "ws-open", "ws-close", "fetch"):
@@ -71,7 +85,7 @@ def serve(out: str | Path, port: int = 8765) -> None:
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"Capturing to {out_path} on http://127.0.0.1:{port} — open the ESPN draft page now. Ctrl+C to stop.")
+    print(f"Listening on http://127.0.0.1:{port} (raw log: {out_path}) — open the ESPN draft page now. Ctrl+C to stop.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

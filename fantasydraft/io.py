@@ -237,6 +237,19 @@ def resolve_team(token: str, league: League) -> int:
     raise ValueError(f"{token!r} is ambiguous: {[league.teams[i].name for i in partial]}")
 
 
+UNKNOWN = "unknown:"
+
+
+def placeholder_player(pid: str) -> Player:
+    """Stand-in for a drafted player missing from the players list, so the pick
+    still counts (and every later pick stays with the right team)."""
+    return Player(pid, f"Unknown player {pid}", frozenset(POSITIONS), 0.0)
+
+
+def is_placeholder(p: Player) -> bool:
+    return p.name == f"Unknown player {p.id}"
+
+
 def load_log(path: str | Path, players: dict[str, Player], league: League | None = None) -> list[tuple]:
     """Read a picks file into entries: ("pick", player_id) or ("auto", team, on)."""
     p = Path(path)
@@ -257,7 +270,11 @@ def load_log(path: str | Path, players: dict[str, Player], league: League | None
                 if league is not None:
                     entries.append(("auto", resolve_team(team, league), cmd in AUTO_ON))
                 continue
-            pid = resolve_player(line, players)
+            if line.lower().startswith(UNKNOWN):
+                pid = line[len(UNKNOWN):].strip()
+                players.setdefault(pid, placeholder_player(pid))
+            else:
+                pid = resolve_player(line, players)
         except ValueError as e:
             raise ValueError(f"{path} line {n}: {e}") from None
         if pid in seen:
@@ -271,7 +288,8 @@ def save_log(entries: list[tuple], players: dict[str, Player], league: League, p
     lines = []
     for e in entries:
         if e[0] == "pick":
-            lines.append(f"{e[1]}  # {players[e[1]].name}")
+            p = players[e[1]]
+            lines.append(f"{UNKNOWN}{p.id}  # not in players list" if is_placeholder(p) else f"{p.id}  # {p.name}")
         else:
             lines.append(f"{'@auto' if e[2] else '@back'} {league.teams[e[1]].name}")
     Path(path).write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")

@@ -409,6 +409,27 @@ def cmd_capture(args) -> None:
         serve(args.out, args.port)
 
 
+def cmd_room(args) -> None:
+    """Follow an ESPN draft room through the browser userscript; write picks.txt live."""
+    from .capture import serve
+    from .room import RoomTracker
+
+    state = load_state(args.players, args.league, None)
+    tracker = RoomTracker(state.league, state.players, args.picks)
+    print(f"Writing picks to {args.picks}. In another terminal run:\n"
+          f"  python -m fantasydraft watch --league {args.league} --picks {args.picks}\n")
+
+    def on_event(e: dict) -> None:
+        if e.get("kind") == "ws-in":
+            tracker.handle_message(str(e.get("data", "")))
+        elif e.get("kind") == "dom-text":
+            tracker.handle_page_text(str(e.get("data", "")))
+        elif e.get("kind") == "hello":
+            print(f"Draft page connected: {e.get('url', '')}")
+
+    serve(args.out, args.port, on_event=on_event, quiet=True)
+
+
 def _league_id(text: str) -> int:
     """Accept a bare id or any ESPN URL containing leagueId=..."""
     import re
@@ -506,6 +527,12 @@ def main(argv: list[str] | None = None) -> None:
     espn(p)
     p.add_argument("--out", default="league.json")
     p.set_defaults(func=cmd_fetch_league)
+
+    p = sub.add_parser("room", help="follow an ESPN draft room live via the browser userscript (writes picks.txt)")
+    files(p)
+    p.add_argument("--out", default="capture.jsonl", help="raw event log (for troubleshooting)")
+    p.add_argument("--port", type=int, default=8765)
+    p.set_defaults(func=cmd_room)
 
     p = sub.add_parser("capture", help="record ESPN draft-room traffic sent by the browser userscript")
     p.add_argument("--out", default="capture.jsonl")

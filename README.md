@@ -43,7 +43,9 @@ python -m fantasydraft watch --league examples/league.json
    | `bench_weight` | how much bench points count vs starters (league-wide) |
    | `players` | players CSV path or Google Sheets link (league-wide) |
 
-3. **Draft day** — in two terminals:
+3. **Draft day**: the most reliable option is following the draft room
+   itself with `room` + `watch` (see [browser/README.md](browser/README.md)).
+   Alternatively, use the league API, in two terminals:
    ```bash
    python -m fantasydraft live  --league-id 12345 --season 2027   # ESPN -> picks.txt
    python -m fantasydraft watch                                   # picks.txt -> recommendations
@@ -59,7 +61,8 @@ python -m fantasydraft watch --league examples/league.json
 | command | what it does |
 |---|---|
 | `draft` | interactive tracker: type picks and `auto`/`back` switches, recommendations after each |
-| `capture` | record the ESPN draft page's live feed via a browser userscript ([browser/README.md](browser/README.md)) |
+| `room` | follow the ESPN draft room live via a browser userscript and write `picks.txt` automatically ([browser/README.md](browser/README.md)) |
+| `capture` | record raw draft-room traffic (troubleshooting) |
 | `new-league` | create a league file (e.g. `mock.json` for an ESPN mock) |
 | `recommend` | rank options for my next pick (one-shot) |
 | `watch` | re-run `recommend` whenever `picks.txt` or `league.json` changes |

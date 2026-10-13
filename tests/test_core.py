@@ -255,3 +255,76 @@ def test_capture_redaction():
     out = redact('{"token":"abc","x":1} SWID={ABCDEF} ' + "a" * 40)
     assert "abc" not in out and "ABCDEF" not in out and "a" * 40 not in out
     assert "SELECTED 3 4065648" == redact("SELECTED 3 4065648")
+
+
+def _mock1_league():
+    return League([TeamProfile(f"Team {i + 1}") for i in range(10)], my_slot=7)
+
+
+def test_room_tracker_replays_real_espn_mock(tmp_path):
+    from fantasydraft.io import apply_log, load_log
+    from fantasydraft.room import RoomTracker
+
+    league = _mock1_league()
+    players = load_players(SAMPLE)
+    picks = tmp_path / "picks.txt"
+    # The capture started at pick 31; stand in for the first 30 picks.
+    picks.write_text("".join(f"unknown:early{i}\n" for i in range(30)))
+    lines = []
+    tracker = RoomTracker(league, players, picks, log=lines.append)
+    feed = (ROOT / "tests" / "data" / "espn_room_mock1.txt").read_text().splitlines()
+    for msg in feed:
+        if msg and not msg.startswith("#"):
+            tracker.handle_message(msg)
+
+    assert not tracker.blocked
+    assert len(tracker.picks) == 129
+    # ESPN team id -> draft position, as worked out from the page's pick list.
+    assert {t: s + 1 for t, s in tracker.team_slot.items()} == {
+        6: 1, 10: 2, 7: 3, 9: 4, 1: 5, 8: 6, 5: 7, 2: 8, 3: 9, 4: 10}
+    assert tracker.my_team_id == 2
+
+    state = DraftState(league, players)
+    apply_log(state, load_log(picks, players, league))
+    assert len(state.picks) == 129
+    # The user: manual at 48, autodraft at 53, manual again from 68.
+    assert 52 in state.auto_picks and 47 not in state.auto_picks and 67 not in state.auto_picks
+    # Bob (7th) was on auto throughout; teams 3, 2 and 6 timed out and stayed on auto.
+    assert state.auto_teams == {6, 2, 1, 5}
+    assert any("ON autodraft" in line for line in lines)
+
+
+def test_room_tracker_detects_wrong_pick_count(tmp_path):
+    from fantasydraft.room import RoomTracker
+
+    league = _mock1_league()
+    lines = []
+    tracker = RoomTracker(league, load_players(SAMPLE), tmp_path / "picks.txt", log=lines.append)
+    # Joined mid-draft with no history: page says pick 31 is on the clock.
+    tracker.handle_page_text("RND 4 OF 13\nON THE CLOCK: PICK 31\n")
+    assert tracker.blocked
+    tracker.handle_message("SELECTED 4 4066261 5 x")
+    assert tracker.picks == []  # held, not written with the wrong team
+
+
+def test_room_tracker_resyncs_from_page_pick_list(tmp_path):
+    from fantasydraft.room import RoomTracker
+
+    league = League([TeamProfile(f"Team {i + 1}") for i in range(2)], my_slot=0,
+                    roster_slots={"PG": 1, "C": 1})
+    players = {p.id: p for p in [P("Bam Adebayo", "C", 1), P("Stephen Curry", "PG", 1),
+                                 P("Jalen Duren", "C", 1), P("Kyrie Irving", "PG", 1)]}
+    tracker = RoomTracker(league, players, tmp_path / "picks.txt", log=lambda s: None)
+    page = """Picks
+Bam Adebayo / MIA C, PF
+R1, P1 - Tarheels
+Stephen Curry / GS PG
+R1, P2 - JUSTICE FOR NOLAN
+Jalen Duren / DET C
+R2, P1 - JUSTICE FOR NOLAN
+ON THE CLOCK: PICK 4
+"""
+    tracker.handle_page_text(page)
+    assert not tracker.blocked
+    assert tracker.picks == ["Bam Adebayo", "Stephen Curry", "Jalen Duren"]
+    assert tracker.slot_names == {0: "Tarheels", 1: "JUSTICE FOR NOLAN"}
