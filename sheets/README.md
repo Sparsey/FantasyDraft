@@ -63,6 +63,9 @@ the draft room shows them. The gap between the two is your edge.
    projections table into A1, or use
    `=IMPORTHTML("https://hashtagbasketball.com/fantasy-basketball-projections", "table", 1)`
    (try 2 or 3 if 1 is the wrong table).
+   If a page is too big for `IMPORTHTML` (e.g. Basketball-Reference), skip
+   the tab and put the page's address in the league file directly; the
+   program reads its stats table itself.
 2. Copy that tab's link (it has `#gid=...` for the tab) into your league file:
    ```json
    "sources": {"hashtag": "https://docs.google.com/spreadsheets/d/<id>/edit#gid=<tab gid>"}

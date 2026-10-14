@@ -535,3 +535,22 @@ def test_basketball_reference_style_source(tmp_path):
     assert j["FGM"] == pytest.approx(11.2 * 70) and j["FGA"] == pytest.approx(19.5 * 70)
     pts, missing = fantasy_points(j, {"PTS": 1, "FGM": 2, "FGA": -1, "TO": -2})
     assert not missing
+
+
+def test_source_from_html_page(tmp_path):
+    from fantasydraft.sources import read_source
+
+    f = tmp_path / "page.html"
+    f.write_text("""<html><body>
+    <table><tr><td>menu</td></tr></table>
+    <table id="per_game_stats"><thead><tr><th>Rk</th><th>Player</th><th>Team</th><th>G</th><th>FG</th><th>FGA</th>
+      <th>FG%</th><th>3P</th><th>FT</th><th>FTA</th><th>TRB</th><th>AST</th><th>STL</th><th>BLK</th><th>TOV</th><th>PTS</th></tr></thead>
+    <tbody><tr><th>1</th><td><a href="#">Nikola Jokić</a>*</td><td>DEN</td><td>70</td><td>11.2</td><td>19.5</td><td>.576</td>
+      <td>2.0</td><td>5.5</td><td>6.6</td><td>12.7</td><td>10.2</td><td>1.8</td><td>0.6</td><td>3.3</td><td>29.9</td></tr>
+    <tr class="thead"><th>Rk</th><th>Player</th><th>Team</th><th>G</th><th>FG</th><th>FGA</th><th>FG%</th><th>3P</th>
+      <th>FT</th><th>FTA</th><th>TRB</th><th>AST</th><th>STL</th><th>BLK</th><th>TOV</th><th>PTS</th></tr></tbody></table>
+    <!-- <table><tr><th>Player</th><th>PTS</th></tr></table> -->
+    </body></html>""")
+    lines = read_source(str(f))
+    assert [l.name for l in lines] == ["Nikola Jokić"]
+    assert lines[0].stats["FGM"] == pytest.approx(11.2 * 70)

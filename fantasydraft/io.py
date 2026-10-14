@@ -43,7 +43,9 @@ def sheet_csv_url(url: str) -> str:
 def _read_text(source: str | Path) -> str:
     src = str(source)
     if src.startswith(("http://", "https://")):
-        req = urllib.request.Request(sheet_csv_url(src), headers={"User-Agent": "fantasydraft"})
+        # A browser-like agent: some stats sites refuse unknown clients.
+        req = urllib.request.Request(sheet_csv_url(src), headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) fantasydraft"})
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.read().decode("utf-8-sig")
     return Path(src).read_text(encoding="utf-8-sig")

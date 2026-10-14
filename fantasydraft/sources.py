@@ -1,7 +1,8 @@
 """Extra projection sources, combined into a consensus value per player.
 
-Each source is a table (a Google Sheets tab, CSV file or URL), typically made
-by pasting or IMPORTHTML-ing a projections page into its own tab. Columns are
+Each source is a table: a Google Sheets tab (pasted or IMPORTHTML-ed), a CSV
+file, or a web page address (its biggest stats table is read directly, which
+avoids Sheets' size limit, e.g. for Basketball-Reference). Columns are
 found by header name, so layouts differ freely:
 
   player name        PLAYER / Name / Player
@@ -24,6 +25,7 @@ import csv
 import io as _io
 import math
 import re
+from html.parser import HTMLParser
 from dataclasses import dataclass, replace
 from statistics import mean, pstdev
 
@@ -96,8 +98,67 @@ class SourceLine:
     per_game: bool
 
 
+class _Tables(HTMLParser):
+    """Collect every <table> on a page as rows of cell text. Tables hidden in
+    HTML comments (as Basketball-Reference does for some) are parsed too."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tables: list[list[list[str]]] = []
+        self._stack: list[list[list[str]]] = []
+        self._row: list[str] | None = None
+        self._cell: list[str] | None = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self._stack.append([])
+        elif tag == "tr" and self._stack:
+            self._row = []
+        elif tag in ("td", "th") and self._row is not None:
+            self._cell = []
+
+    def handle_endtag(self, tag):
+        if tag in ("td", "th") and self._cell is not None and self._row is not None:
+            self._row.append(" ".join("".join(self._cell).split()))
+            self._cell = None
+        elif tag == "tr" and self._row is not None and self._stack:
+            if self._row:
+                self._stack[-1].append(self._row)
+            self._row = None
+        elif tag == "table" and self._stack:
+            self.tables.append(self._stack.pop())
+
+    def handle_data(self, data):
+        if self._cell is not None:
+            self._cell.append(data)
+
+    def handle_comment(self, data):
+        if "<table" in data:
+            inner = _Tables()
+            inner.feed(data)
+            self.tables.extend(inner.tables)
+
+
+def _rows(src: str) -> list[list[str]]:
+    """Rows of a source: CSV (sheet tab / file), or the best stats table of a web page."""
+    text = _read_text(src)
+    if "<table" not in text[:2_000_000].lower():
+        return list(csv.reader(_io.StringIO(text)))
+    parser = _Tables()
+    parser.feed(text)
+
+    def score(table: list[list[str]]) -> int:
+        best = max((sum(_key(c) is not None for c in r) for r in table[:5]), default=0)
+        return best * 1000 + len(table)
+
+    tables = [t for t in parser.tables if t]
+    if not tables:
+        raise ValueError(f"{src}: no tables found on the page")
+    return max(tables, key=score)
+
+
 def read_source(src: str) -> list[SourceLine]:
-    rows = list(csv.reader(_io.StringIO(_read_text(src))))
+    rows = _rows(src)
     header_idx = next((i for i, r in enumerate(rows)
                        if sum(_key(c) is not None for c in r) >= 4 and any(_key(c) == "name" for c in r)), None)
     if header_idx is None:
