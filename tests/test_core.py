@@ -338,6 +338,9 @@ def test_room_tracker_flags_wrong_team_count(tmp_path):
     league = _mock1_league()
     lines = []
     tracker = RoomTracker(league, load_players(SAMPLE), tmp_path / "picks.txt", log=lines.append)
+    # the pick carousel: round 2 starts at pick 9
+    tracker.handle_page_text("ON THE CLOCK: PICK 1\nTeam A\nPICK 2\nTeam B\nROUND\n2\nPICK 9\nTeam H")
+    assert tracker.team_count == 8
     order = list(range(1, 9)) + list(range(8, 0, -1))
     for i, team in enumerate(order):
         tracker.handle_message(f"SELECTING {team} 60000")
@@ -716,6 +719,7 @@ def test_missed_picks_entered_by_hand_release_held_feed(tmp_path):
     players = load_players(SAMPLE)
     ids = sorted(players, key=lambda pid: players[pid].espn_rank)
     tracker = RoomTracker(league, players, tmp_path / "picks.txt", log=lambda s: None)
+    tracker.handle_page_text("ON THE CLOCK: PICK 1")
 
     def feed(pick):
         team = league.team_for_pick(pick) + 1
@@ -879,6 +883,7 @@ def test_room_resync_keeps_mapping_and_autodraft(tmp_path):
     league = League([TeamProfile(f"Team {i + 1}") for i in range(10)], my_slot=7)
     espn = [3, 7, 1, 9, 4, 10, 2, 8, 5, 6]
     tr = RoomTracker(league, players, tmp_path / "p.txt", log=lambda _: None)
+    tr.handle_page_text("ON THE CLOCK: PICK 1")
     for k in range(12):
         t = espn[league.team_for_pick(k)]
         tr.handle_message(f"SELECTING {t} 60000")
@@ -989,6 +994,7 @@ def test_wrong_team_count_is_detected_and_restart_recovers(tmp_path):
     ten = League([TeamProfile(f"Team {i + 1}") for i in range(10)], 2)
     picks = tmp_path / "mock1.txt"
     tr = RoomTracker(ten, players, picks, log=lambda _: None)
+    tr.handle_page_text("ON THE CLOCK: PICK 1\nROUND\n2\nPICK 9")
     tr.handle_message("TOKEN 1:2:23:x")
     for k in range(10):
         t = espn[real.team_for_pick(k)]
@@ -1015,6 +1021,7 @@ def test_resync_from_a_partial_pick_list(tmp_path):
     league = League([TeamProfile(f"Team {i + 1}") for i in range(8)], 2)
     espn = [21, 22, 23, 24, 25, 26, 27, 28]
     tr = RoomTracker(league, players, tmp_path / "p.txt", log=lambda _: None)
+    tr.handle_page_text("ON THE CLOCK: PICK 1")
     for k in list(range(10)) + [13, 14]:  # picks 11-13 missed in a reload
         t = espn[league.team_for_pick(k)]
         tr.handle_message(f"SELECTING {t} 60000")
@@ -1026,6 +1033,7 @@ def test_resync_from_a_partial_pick_list(tmp_path):
     assert not tr.blocked and tr.picks == ids[:15]
     # but a page that disagrees with what we have is not trusted
     tr2 = RoomTracker(league, players, tmp_path / "q.txt", log=lambda _: None)
+    tr2.handle_page_text("ON THE CLOCK: PICK 1")
     for k in range(10):
         t = espn[league.team_for_pick(k)]
         tr2.handle_message(f"SELECTING {t} 60000")
@@ -1067,3 +1075,26 @@ def test_old_picks_file_is_set_aside_for_a_new_draft(tmp_path):
     tr.handle_message("SELECTING 5 60000")
     tr.handle_message(f"SELECTED 5 {ids[0]} 1 m")
     assert tr.picks == [ids[5], ids[0]]
+
+
+def test_late_start_waits_for_the_page_and_carousel_matching_count_is_quiet(tmp_path):
+    from fantasydraft.room import RoomTracker
+
+    players = load_players(SAMPLE)
+    ids = sorted(players, key=lambda p: players[p].espn_rank)
+    league = League([TeamProfile(f"T{i}") for i in range(14)], 13)  # 14 teams, I pick 14th
+    espn = list(range(31, 45))
+    tr = RoomTracker(league, players, tmp_path / "m.txt", log=lambda _: None)
+    # dashboard started late: picks 9-12 arrive before any page text
+    for k in range(8, 12):
+        t = espn[league.team_for_pick(k)]
+        tr.handle_message(f"SELECTING {t} 60000")
+        tr.handle_message(f"SELECTED {t} {ids[k]} 1 m")
+    assert tr.picks == [] and tr.blocked  # nothing assumed to be picks 1-4
+    tr.handle_page_text("ON THE CLOCK: PICK 13\nTeam\nROUND\n2\nPICK 15\nTeam")
+    assert tr.team_count is None  # 14 teams, as the file says: no false alarm
+    assert tr.missing() == (1, 8)  # picks 1-8 to enter; 9-12 are held
+    for k in range(8):
+        tr.manual_pick(ids[k])
+    assert not tr.blocked and tr.picks == ids[:12]
+    assert tr.team_slot == {espn[league.team_for_pick(k)]: league.team_for_pick(k) for k in range(8, 12)}
