@@ -43,8 +43,14 @@ class Recommendation:
     drawn: list[float] = field(default_factory=list)
 
 
-def candidate_pool(state: DraftState, k: int, exclude: set[str] = frozenset()) -> list[Player]:
-    """Top players by immediate roster gain, plus the best player at each position."""
+NOW_OR_NEVER = 3  # always compare this many good players who won't last to your following pick
+
+
+def candidate_pool(state: DraftState, k: int, exclude: set[str] = frozenset(),
+                   avail_probs: dict[str, list[float]] | None = None) -> list[Player]:
+    """Top players by immediate roster gain, plus the best player at each
+    position, plus the best few who probably won't last to your following pick
+    (so "take him now, the other one later" is always among the plans compared)."""
     league = state.league
     roster = state.rosters()[league.my_slot]
     base = team_value(roster, league)
@@ -62,6 +68,11 @@ def candidate_pool(state: DraftState, k: int, exclude: set[str] = frozenset()) -
         best = next((p for p in by_gain if pos in p.positions), None)
         if best is not None:
             picked.setdefault(best.id, best)
+    if avail_probs:
+        soon_gone = [p for p in avail[: k * 2]
+                     if len(avail_probs.get(p.id) or []) > 1 and avail_probs[p.id][1] < 0.5]
+        for p in soon_gone[:NOW_OR_NEVER]:
+            picked.setdefault(p.id, p)
     return list(picked.values())
 
 
@@ -97,7 +108,7 @@ def recommend(
     gone = set() if on_clock else {pid for pid, pr in avail.items() if pr and pr[0] < MIN_AVAIL}
     sim = Simulator(state)
     out: list[Recommendation] = []
-    for p in candidate_pool(state, candidates, exclude=gone):
+    for p in candidate_pool(state, candidates, exclude=gone, avail_probs=avail):
         values, drawn = [], []
         for i in range(sims):
             run = sim.run(random.Random(seed * 1_000_003 + i), my_next=p)

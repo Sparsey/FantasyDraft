@@ -1189,3 +1189,17 @@ def test_take_the_player_who_wont_last_and_wait_on_the_one_who_will():
     assert recs[0].player.name == "F"  # G will still be there next time; F won't
     base, vs = versus_highest_projection(recs)
     assert pick_gamble(recs, vs, base) is None or pick_gamble(recs, vs, base).name == "F"
+
+
+def test_now_or_never_players_are_always_compared():
+    from fantasydraft.recommend import candidate_pool
+
+    # 'soon' is a bit below the shortlist by roster gain, but won't last to my following pick
+    pl = [P(f"g{i}", "PG", 1000 - i) for i in range(6)] + [P("soon", "PG", 993)]
+    players = {p.id: p for p in pl}
+    lg = League([TeamProfile("me"), TeamProfile("a")], 0, roster_slots={"PG": 1, "BE": 2})
+    st = DraftState(lg, players)
+    probs = {p.id: [1.0, 1.0] for p in pl}
+    probs["soon"] = [1.0, 0.0]
+    assert "soon" not in {p.id for p in candidate_pool(st, 4)}
+    assert "soon" in {p.id for p in candidate_pool(st, 4, avail_probs=probs)}
