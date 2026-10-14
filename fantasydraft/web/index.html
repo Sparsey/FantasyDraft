@@ -142,6 +142,8 @@
   .gap small { font-weight: 500; opacity: .8; }
   .gap.gup { color: var(--good); background: var(--good-soft); }
   .gap.gdn { color: var(--bad); background: var(--bad-soft); }
+  td.mup b { color: var(--good); }
+  td.mdn b { color: var(--bad); }
   .agr { font-size: 10.5px; font-weight: 600; color: var(--muted); margin-left: 4px; }
   .advice { margin: 8px 10px 4px; padding: 8px 11px; border-radius: 8px; font-size: 13px; line-height: 1.45;
             background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
@@ -233,19 +235,18 @@ function bar(p) {
   const cls = p >= 0.7 ? "hi" : p <= 0.3 ? "lo" : "";
   return `<span class="bar ${cls}"><i><b style="width:${Math.round(p * 100)}%"></b></i><span>${pct(p)}</span></span>`;
 }
-const agreeTxt = (a) => a ? `<span class="agr" title="${a[0]} of ${a[1]} other sources are on this side of ESPN">${a[0]}/${a[1]}</span>` : "";
-// ESPN's projection, yours, and the gap as a coloured pill (hover: each source).
+// ESPN's projection and yours, coloured by which way yours differs
+// (hover Mine: the difference and each source).
 const projHead = `<th class="num" title="ESPN's projection: what the room sees">ESPN</th>
-  <th class="num" title="Your combined projection (ESPN + your sources)">Mine</th>
-  <th class="num" title="Mine minus ESPN's. Green: your sources like him more than ESPN does. n/m = how many of your other sources agree">Diff</th>`;
+  <th class="num" title="Your combined projection (ESPN + your sources). Green: higher than ESPN's, red: lower. Hover a number for the difference and each source">Mine</th>`;
 const projCells = (x) => {
-  const d = x.espn != null ? x.proj - x.espn : null;
-  const t = (x.sources || []).map(([n, v]) => n + " " + v.toLocaleString()).join(" · ");
-  const pctTxt = d && x.espn ? ` <small>${d > 0 ? "+" : ""}${Math.round(d / x.espn * 100)}%</small>` : "";
-  const pill = d == null || Math.abs(d) < 1 ? `<span class="muted">same</span>`
-    : `<span class="gap ${d > 0 ? "gup" : "gdn"}">${d > 0 ? "+" : "−"}${Math.abs(d).toLocaleString()}${pctTxt}</span>${agreeTxt(x.agree)}`;
+  const d = x.espn != null ? Math.round(x.proj - x.espn) : 0;
+  const tip = [d ? `Mine − ESPN: ${d > 0 ? "+" : "−"}${Math.abs(d).toLocaleString()}` +
+      (x.espn ? ` (${d > 0 ? "+" : ""}${Math.round(d / x.espn * 100)}%)` : "") : "Same as ESPN",
+    x.agree ? `${x.agree[0]} of ${x.agree[1]} other sources agree` : "",
+    (x.sources || []).map(([n, v]) => n + " " + v.toLocaleString()).join(" · ")].filter(Boolean).join("\n");
   return `<td class="num muted">${x.espn != null ? x.espn.toLocaleString() : "–"}</td>
-    <td class="num"><b>${x.proj.toLocaleString()}</b></td><td class="num" title="${esc(t)}">${pill}</td>`;
+    <td class="num ${Math.abs(d) < 1 ? "" : d > 0 ? "mup" : "mdn"}" title="${esc(tip)}"><b>${x.proj.toLocaleString()}</b></td>`;
 };
 function gambleWhy(g) {
   if (!g) return "";
@@ -475,7 +476,7 @@ function renderTeams() {
 function renderTable(r) {
   const body = $("tablebody");
   if (tab === "recs") {
-    const cols = (r.has_sources ? 4 : 2) + 3 + (manual() ? 1 : 0);
+    const cols = (r.has_sources ? 3 : 2) + 3 + (manual() ? 1 : 0);
     if (!r.recs) { body.innerHTML = `<div class="empty-note">Working out recommendations…</div>`; return; }
     if (!r.recs.length) { body.innerHTML = `<div class="empty-note">Nothing to recommend — your draft is done.</div>`; return; }
     body.innerHTML = `<table><thead><tr><th>Player</th>
