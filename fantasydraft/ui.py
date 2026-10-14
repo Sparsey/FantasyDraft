@@ -38,7 +38,7 @@ from .simulate import availability, predict_picks
 PAGE = Path(__file__).parent / "web" / "index.html"
 TARGET_MIN_AVAIL = 0.5  # the target must have at least this chance of being there at your pick
 GAMBLE_MIN_LASTS = 0.25  # only suggest waiting on the target if he has at least this chance of lasting
-GAMBLE_MARGIN = 100  # a GAMBLE player may be at most this much below the target by your projections
+GAMBLE_MIN_GAIN = 25  # a GAMBLE must beat the best player likely left at your following pick by this much
 
 
 def _pos(p: Player) -> str:
@@ -251,9 +251,9 @@ class Dashboard:
     @staticmethod
     def _gamble(st: DraftState, probs: dict | None, target_id: str | None) -> dict | None:
         """GAMBLE: wait on the target. Take a player now who won't last to your
-        following pick and is nearly as good as the target (within GAMBLE_MARGIN
-        by your projections), hoping the target is still there next time, so you
-        end up with both. How safe it is: the chance the target lasts."""
+        following pick and beats the best player likely still there then (what
+        you'd get at that pick if you took the target now), hoping the target
+        lasts, so you end up with both. How safe it is: the chance the target lasts."""
         mine = st.my_next_picks()
         target = st.players.get(target_id) if target_id else None
         if probs is None or not mine or target is None or target.id in set(st.picks):
@@ -263,25 +263,35 @@ class Dashboard:
         lasts = lambda p: (probs.get(p.id) or [0, 0])[1] if len(probs.get(p.id) or []) > 1 else 0.0  # noqa: E731
         if len(mine) < 2:
             return None  # your last pick: nothing to wait for
-        options = [p for p in st.available() if not is_placeholder(p) and p.id != target.id
-                   and now(p) >= 0.5 and lasts(p) < 0.5 and p.proj_points >= target.proj_points - GAMBLE_MARGIN]
-        if not options:
-            return None
         safety = lasts(target)
         if safety < GAMBLE_MIN_LASTS:
             return None  # the target almost surely won't last: there is nothing to wait on
+        pool = [p for p in st.available() if not is_placeholder(p) and p.id != target.id]
+        # Taking the target now leaves you, at your following pick, at best the
+        # best player likely still there then. A gamble must beat that.
+        later = max((p for p in pool if lasts(p) >= 0.5), key=lambda p: p.proj_points, default=None)
+        bar = later.proj_points if later else float("-inf")
+        options = [p for p in pool if now(p) >= 0.5 and lasts(p) < 0.5 and p.proj_points >= bar + GAMBLE_MIN_GAIN]
+        if not options:
+            return None
         g = max(options, key=lambda p: p.proj_points)
         return {"id": g.id, "name": g.name, "target": target.name, "target_id": target.id,
                 "g_proj": round(g.proj_points), "t_proj": round(target.proj_points),
+                "later": later.name if later else None, "gain": round(g.proj_points - bar) if later else None,
                 "t_lasts": round(safety, 2), "g_lasts": round(lasts(g), 2),
                 "level": "safe" if safety >= 0.7 else "medium" if safety >= 0.45 else "risky",
                 "next_pick": mine[1] + 1}
 
     @staticmethod
     def _choose_target(recs: list, floor_pts: float | None):
-        """recs come best plan first. Never below the floor (someone at least that
-        good is guaranteed); among the rest the best plan with an even or better
-        chance of being there, else the one most likely to be there."""
+        """recs come best plan first. The best plan is the target when he has an
+        even or better chance of being there (it may be a player who won't last,
+        taken now so a better one can be had later). If the best plan is a long
+        shot: never a player below the floor (someone at least that good is
+        guaranteed); among the rest the best plan with an even or better chance,
+        else the one most likely to be there."""
+        if recs and recs[0].p_avail_now >= TARGET_MIN_AVAIL:
+            return recs[0]
         above = [r for r in recs if floor_pts is None or r.player.proj_points >= floor_pts] or recs
         return next((r for r in above if r.p_avail_now >= TARGET_MIN_AVAIL), None) \
             or max(above, key=lambda r: (r.p_avail_now, r.exp_final_value), default=None)

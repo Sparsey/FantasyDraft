@@ -1208,21 +1208,25 @@ def test_now_or_never_players_are_always_compared():
 def test_gamble_waits_on_the_target():
     from fantasydraft.ui import Dashboard
 
-    # T: the target, likely to last; X: nearly as good and won't last; W: will last; f: far worse
-    pl = [P("T", "C", 2000), P("X", "PG", 1950), P("W", "SF", 1990), P("f", "PF", 1500)]
+    # T: the target, likely to last; X: won't last, beats what's left later (L), though below T
+    pl = [P("T", "C", 3200), P("X", "PG", 2900), P("L", "SF", 2700), P("f", "PF", 2600)]
     players = {p.id: p for p in pl}
     lg = League([TeamProfile("me"), TeamProfile("a")], 0)
     st = DraftState(lg, players)  # on the clock, more picks to come
-    probs = {"T": [1, 0.8], "X": [1, 0.1], "W": [1, 0.95], "f": [1, 0.0]}
+    probs = {"T": [1, 1.0], "X": [1, 0.0], "L": [1, 0.9], "f": [1, 0.0]}
     g = Dashboard._gamble(st, probs, "T")
-    assert g["name"] == "X" and g["target"] == "T" and g["level"] == "safe"  # f is too far below T
+    assert g["name"] == "X" and g["level"] == "safe" and g["later"] == "L" and g["gain"] == 200
     probs["T"] = [1, 0.3]
     assert Dashboard._gamble(st, probs, "T")["level"] == "risky"
     probs["T"] = [1, 0.1]  # the target won't last: nothing to wait on
     assert Dashboard._gamble(st, probs, "T") is None
-    probs["T"] = [1, 0.8]
-    probs["X"] = [1, 0.9]  # X would last too: nothing is now-or-never
+    probs["T"] = [1, 1.0]
+    probs["L"] = [1, 0.0]
+    probs["f"] = [1, 0.9]  # what's left later is now f (2600): X still beats it
+    assert Dashboard._gamble(st, probs, "T")["gain"] == 300
+    probs["X"] = [1, 0.9]  # X would last too; L is now-or-never but doesn't beat X, who'd be left
     assert Dashboard._gamble(st, probs, "T") is None
+
 
 def test_target_is_never_below_the_floor():
     from fantasydraft.ui import Dashboard
@@ -1235,3 +1239,7 @@ def test_target_is_never_below_the_floor():
     assert Dashboard._choose_target(recs, floor_pts=None).player.name == "low"  # (no floor known: old rule)
     recs[0] = R("star1", 3000, 0.60, 100)
     assert Dashboard._choose_target(recs, floor_pts=2900).player.name == "star1"
+    # the best plan is a player below the floor who won't last (the better one will):
+    # realistic, so he is the target
+    recs = [R("now", 2850, 1.0, 120), R("lasts", 3000, 1.0, 110)]
+    assert Dashboard._choose_target(recs, floor_pts=2900).player.name == "now"

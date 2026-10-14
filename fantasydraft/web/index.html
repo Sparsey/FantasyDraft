@@ -251,6 +251,7 @@ function gambleWhy(g) {
   if (!g) return "";
   const n = (x) => x.toLocaleString();
   return `Take ${g.name} now (yours ${n(g.g_proj)}) and wait on your target ${g.target} (${n(g.t_proj)}).\n` +
+    (g.later ? `If it works: +${n(g.gain)} over ${g.later}, the best player likely still there at #${g.next_pick} otherwise.\n` : "") +
     `${g.name} is only ${pct(g.g_lasts)} likely to last to #${g.next_pick}, so it's now or never.\n` +
     `${g.level.toUpperCase()}: ${g.target} is ${pct(g.t_lasts)} likely to still be there at #${g.next_pick}` +
     (g.level === "safe" ? ", so you'll probably get both." : g.level === "medium" ? "." : ", so waiting on him probably means losing him.");
