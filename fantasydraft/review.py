@@ -81,7 +81,7 @@ def review(state: DraftState, decisions_path: str | Path | None = None) -> str:
             tags = []
             if s.get("gamble"):
                 if s.get("gamble_level"):
-                    detail = f" ({s['gamble_level']}, {s['gamble_gain']:+} by your projections)"
+                    detail = f" ({s['gamble_level']}: target {s.get('gamble_t_lasts', 0):.0%} likely to last)"
                 elif s.get("gamble_p_better") is not None:  # records from older versions
                     detail = f" ({s['gamble_p_better']:.0%} chance better, {s['gamble_diff']:+})"
                 else:

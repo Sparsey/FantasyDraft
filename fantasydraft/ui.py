@@ -37,7 +37,8 @@ from .simulate import availability, predict_picks
 
 PAGE = Path(__file__).parent / "web" / "index.html"
 TARGET_MIN_AVAIL = 0.5  # the target must have at least this chance of being there at your pick
-GAMBLE_MIN_GAIN = 50  # a GAMBLE must beat ESPN's pick by at least this much by your projections
+GAMBLE_MIN_LASTS = 0.25  # only suggest waiting on the target if he has at least this chance of lasting
+GAMBLE_MARGIN = 100  # a GAMBLE player may be at most this much below the target by your projections
 
 
 def _pos(p: Player) -> str:
@@ -221,7 +222,7 @@ class Dashboard:
         # Keep the last target highlighted until the new comparison is in.
         mine = st.my_next_picks()
         keep = self._target[1] if self._target[0] == mine[0] else None
-        gamble = self._gamble(st, probs)
+        gamble = self._gamble(st, probs, keep)
         rows = [{**self._board_row(st, p, probs),
                  "is_target": p.id == keep,
                  "tag": "gamble" if gamble and p.id == gamble["id"]
@@ -248,34 +249,33 @@ class Dashboard:
         return shown, espn_top
 
     @staticmethod
-    def _gamble(st: DraftState, probs: dict | None) -> dict | None:
-        """GAMBLE: take a player who raises your total by your projections (at
-        least GAMBLE_MIN_GAIN over ESPN's pick) and won't last to your following
-        pick, passing on ESPN's pick. How safe that is: the chance ESPN's pick
-        is still there at your following pick (high = you'll likely get him then)."""
+    def _gamble(st: DraftState, probs: dict | None, target_id: str | None) -> dict | None:
+        """GAMBLE: wait on the target. Take a player now who won't last to your
+        following pick and is nearly as good as the target (within GAMBLE_MARGIN
+        by your projections), hoping the target is still there next time, so you
+        end up with both. How safe it is: the chance the target lasts."""
         mine = st.my_next_picks()
-        if probs is None or not mine:
+        target = st.players.get(target_id) if target_id else None
+        if probs is None or not mine or target is None or target.id in set(st.picks):
             return None
         on_clock = mine[0] == st.current_pick
         now = lambda p: 1.0 if on_clock else (probs.get(p.id) or [0])[0]  # noqa: E731
         lasts = lambda p: (probs.get(p.id) or [0, 0])[1] if len(probs.get(p.id) or []) > 1 else 0.0  # noqa: E731
-        avail = [p for p in st.available() if not is_placeholder(p) and now(p) >= MIN_AVAIL]
-        if not avail:
-            return None
-        espn = max(avail, key=lambda p: (p.room_points, p.proj_points))
-        options = [p for p in avail if p.id != espn.id and now(p) >= 0.5 and lasts(p) < 0.5
-                   and p.proj_points - espn.proj_points >= GAMBLE_MIN_GAIN]
+        if len(mine) < 2:
+            return None  # your last pick: nothing to wait for
+        options = [p for p in st.available() if not is_placeholder(p) and p.id != target.id
+                   and now(p) >= 0.5 and lasts(p) < 0.5 and p.proj_points >= target.proj_points - GAMBLE_MARGIN]
         if not options:
             return None
+        safety = lasts(target)
+        if safety < GAMBLE_MIN_LASTS:
+            return None  # the target almost surely won't last: there is nothing to wait on
         g = max(options, key=lambda p: p.proj_points)
-        safety = lasts(espn)
-        return {"id": g.id, "name": g.name, "espn": espn.name, "espn_id": espn.id,
-                "gain": round(g.proj_points - espn.proj_points),
-                "g_proj": round(g.proj_points), "g_espn": round(g.room_points),
-                "e_proj": round(espn.proj_points), "e_espn": round(espn.room_points),
-                "e_lasts": round(safety, 2), "g_lasts": round(lasts(g), 2),
-                "level": "safe" if safety >= 0.7 else "medium" if safety >= 0.3 else "risky",
-                "next_pick": mine[1] + 1 if len(mine) > 1 else None}
+        return {"id": g.id, "name": g.name, "target": target.name, "target_id": target.id,
+                "g_proj": round(g.proj_points), "t_proj": round(target.proj_points),
+                "t_lasts": round(safety, 2), "g_lasts": round(lasts(g), 2),
+                "level": "safe" if safety >= 0.7 else "medium" if safety >= 0.45 else "risky",
+                "next_pick": mine[1] + 1}
 
     @staticmethod
     def _cumulative(st: DraftState, likely: dict[str, float]) -> dict[str, float]:
@@ -365,7 +365,7 @@ class Dashboard:
             recs = [realistic] + [r for r in recs if r is not realistic]
         advice = self._advice(st, recs, probs)
         baseline, vs = versus_highest_projection(recs)
-        gamble = self._gamble(st, probs)
+        gamble = self._gamble(st, probs, recs[0].player.id if recs else None)
         if advice is not None:
             advice["safe"] = baseline.name if baseline else None
             advice["gamble"] = gamble
@@ -375,7 +375,7 @@ class Dashboard:
                 "espn": baseline.id if baseline else None,
                 "gamble": gamble["id"] if gamble else None,
                 "gamble_level": gamble["level"] if gamble else None,
-                "gamble_gain": gamble["gain"] if gamble else None}
+                "gamble_t_lasts": gamble["t_lasts"] if gamble else None}
 
         def vs_fields(r):
             v = vs.get(r.player.id)

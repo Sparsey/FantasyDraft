@@ -1205,19 +1205,21 @@ def test_now_or_never_players_are_always_compared():
     assert "soon" in {p.id for p in candidate_pool(st, 4, avail_probs=probs)}
 
 
-def test_gamble_rule_lasts_and_gain():
+def test_gamble_waits_on_the_target():
     from fantasydraft.ui import Dashboard
 
-    # E: ESPN's pick; X: +100 by my numbers and won't last; W: +200 but will last (just wait on him)
-    pl = [P("E", "C", 2000), P("X", "PG", 2100), P("W", "SF", 2200), P("f", "PF", 1000)]
-    pl = [p if p.name != "E" else __import__("dataclasses").replace(p, espn_points=2500) for p in pl]
+    # T: the target, likely to last; X: nearly as good and won't last; W: will last; f: far worse
+    pl = [P("T", "C", 2000), P("X", "PG", 1950), P("W", "SF", 1990), P("f", "PF", 1500)]
     players = {p.id: p for p in pl}
     lg = League([TeamProfile("me"), TeamProfile("a")], 0)
-    st = DraftState(lg, players)  # on the clock
-    probs = {"E": [1, 0.8], "X": [1, 0.1], "W": [1, 0.95], "f": [1, 1]}
-    g = Dashboard._gamble(st, probs)
-    assert g["name"] == "X" and g["espn"] == "E" and g["gain"] == 100 and g["level"] == "safe"
-    probs["E"] = [1, 0.1]
-    assert Dashboard._gamble(st, probs)["level"] == "risky"
+    st = DraftState(lg, players)  # on the clock, more picks to come
+    probs = {"T": [1, 0.8], "X": [1, 0.1], "W": [1, 0.95], "f": [1, 0.0]}
+    g = Dashboard._gamble(st, probs, "T")
+    assert g["name"] == "X" and g["target"] == "T" and g["level"] == "safe"  # f is too far below T
+    probs["T"] = [1, 0.3]
+    assert Dashboard._gamble(st, probs, "T")["level"] == "risky"
+    probs["T"] = [1, 0.1]  # the target won't last: nothing to wait on
+    assert Dashboard._gamble(st, probs, "T") is None
+    probs["T"] = [1, 0.8]
     probs["X"] = [1, 0.9]  # X would last too: nothing is now-or-never
-    assert Dashboard._gamble(st, probs) is None
+    assert Dashboard._gamble(st, probs, "T") is None

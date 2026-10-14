@@ -250,12 +250,10 @@ const projCells = (x) => {
 function gambleWhy(g) {
   if (!g) return "";
   const n = (x) => x.toLocaleString();
-  const next = g.next_pick ? `#${g.next_pick}` : "your next pick";
-  return `Take ${g.name} now: +${n(g.gain)} by your projections over ESPN's pick ${g.espn} ` +
-    `(yours ${n(g.g_proj)} vs ${n(g.e_proj)}; ESPN ${n(g.g_espn)} vs ${n(g.e_espn)}).\n` +
-    `${g.name} is only ${pct(g.g_lasts)} likely to last to ${next}, so it's now or never.\n` +
-    `${g.level.toUpperCase()}: ${g.espn} is ${pct(g.e_lasts)} likely to still be there at ${next}` +
-    (g.level === "safe" ? ", so you'll probably get him then too." : g.level === "medium" ? "." : ", so passing on him probably means losing him.");
+  return `Take ${g.name} now (yours ${n(g.g_proj)}) and wait on your target ${g.target} (${n(g.t_proj)}).\n` +
+    `${g.name} is only ${pct(g.g_lasts)} likely to last to #${g.next_pick}, so it's now or never.\n` +
+    `${g.level.toUpperCase()}: ${g.target} is ${pct(g.t_lasts)} likely to still be there at #${g.next_pick}` +
+    (g.level === "safe" ? ", so you'll probably get both." : g.level === "medium" ? "." : ", so waiting on him probably means losing him.");
 }
 function tagTxt(x, r) {
   let t = "";
