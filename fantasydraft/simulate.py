@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Iterator
 
 from .drafters import CANDIDATE_POOL, add_to_counts, base_key, choose_pick, full_positions, order_for
@@ -19,6 +19,7 @@ class SimResult:
     taken_at: dict[str, int]  # player id -> overall pick at which an opponent took them
     my_roster: list[Player]
     my_value: float
+    order: dict[int, str] = field(default_factory=dict)  # overall pick -> player id (all teams)
 
 
 class Simulator:
@@ -103,18 +104,21 @@ class Simulator:
             key=lambda p: (team_value(roster + [p], self.league) - base, p.proj_points),
         )
 
-    def run(self, rng: random.Random, my_next: Player | None = None, i_pick: bool = True) -> SimResult:
+    def run(self, rng: random.Random, my_next: Player | None = None, i_pick: bool = True,
+            until: int | None = None) -> SimResult:
         """Simulate to the end of the draft.
 
         my_next: take this player at my next pick if still there (otherwise
                  fall back to my greedy policy).
         i_pick:  if False, my turns are skipped and nobody is removed, which
                  isolates what opponents alone would take.
+        until:   stop before this overall pick (for short-range predictions).
         """
         league = self.league
         taken = set(self.state.picks)
         my_roster = self.state.rosters()[league.my_slot]
         taken_at: dict[str, int] = {}
+        order: dict[int, str] = {}
         starts: dict[str, int] = {}
         forced = my_next
         bias = league.position_bias
@@ -124,7 +128,7 @@ class Simulator:
             for p in roster:
                 add_to_counts(counts[t], p)
 
-        for pick in range(self.state.current_pick, league.total_picks):
+        for pick in range(self.state.current_pick, min(until or league.total_picks, league.total_picks)):
             team = league.team_for_pick(pick)
             if team == league.my_slot:
                 if not i_pick:
@@ -135,16 +139,18 @@ class Simulator:
                     choice = self.my_greedy_pick(my_roster, taken)
                 forced = None
                 my_roster.append(choice)
+                order[pick] = choice.id
             else:
                 profile = self.profile(team)
                 pool, keys = self._pool(profile.strategy, taken, starts)
                 full = full_positions(counts[team], targets) if bias else frozenset()
                 choice = choose_pick(profile, pool, rng, pick, keys, full, bias, counts[team], targets)
                 taken_at[choice.id] = pick
+                order[pick] = choice.id
                 add_to_counts(counts[team], choice)
             taken.add(choice.id)
 
-        return SimResult(taken_at, my_roster, team_value(my_roster, league))
+        return SimResult(taken_at, my_roster, team_value(my_roster, league), order)
 
 
 def availability(state: DraftState, sims: int = 200, seed: int = 0) -> dict[str, list[float]]:
@@ -167,3 +173,31 @@ def availability(state: DraftState, sims: int = 200, seed: int = 0) -> dict[str,
                 if t is None or t > mp:
                     row[k] += 1
     return {pid: [c / sims for c in row] for pid, row in counts.items()}
+
+
+def predict_picks(state: DraftState, sims: int = 150, horizon: int = 15, seed: int = 0,
+                  top: int = 3) -> list[dict]:
+    """Most likely players at each of the next `horizon` picks.
+
+    Returns [{"pick": overall pick (0-based), "team": slot, "probs": {player id: P}}],
+    where probs holds every player seen at that pick (sorted, most likely first);
+    callers can trim to the top few.
+    """
+    sim = Simulator(state)
+    start = state.current_pick
+    end = min(start + horizon, state.league.total_picks)
+    counts: list[dict[str, int]] = [{} for _ in range(start, end)]
+    rng = random.Random(seed)
+    for _ in range(sims):
+        order = sim.run(rng, until=end).order
+        for k in range(start, end):
+            pid = order.get(k)
+            if pid is not None:
+                c = counts[k - start]
+                c[pid] = c.get(pid, 0) + 1
+    out = []
+    for k in range(start, end):
+        c = counts[k - start]
+        probs = dict(sorted(((pid, n / sims) for pid, n in c.items()), key=lambda kv: -kv[1]))
+        out.append({"pick": k, "team": state.league.team_for_pick(k), "probs": probs})
+    return out

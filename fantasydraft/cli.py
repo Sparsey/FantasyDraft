@@ -483,6 +483,22 @@ def cmd_room(args) -> None:
     serve(args.out, args.port, on_event=on_event, quiet=True)
 
 
+def cmd_benchmark(args) -> None:
+    from .benchmark import benchmark, summarize
+    from .io import load_players
+
+    league = load_state(args.players, args.league, None).league if args.league else None
+    if league is None or league.num_teams != 10:
+        from .models import League, TeamProfile
+
+        league = League([TeamProfile(f"T{i}") for i in range(10)], 0)
+    players = load_players(args.players or "data/sample_players.csv")
+    print(f"{args.drafts} drafts x {len(args.policies)} policies, recommender sims={args.sims}")
+    results = benchmark(players, league, args.drafts, args.sims, args.candidates, args.policies)
+    print()
+    print(summarize(results))
+
+
 def _league_id(text: str) -> int:
     """Accept a bare id or any ESPN URL containing leagueId=..."""
     import re
@@ -596,6 +612,15 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--out", default="capture.jsonl", help="raw event log (for troubleshooting)")
     p.add_argument("--port", type=int, default=8765)
     p.set_defaults(func=cmd_room)
+
+    p = sub.add_parser("benchmark", help="simulated drafts: how much each pick policy gains over autodraft")
+    p.add_argument("--players", help="players CSV or sheet link (default: sample data)")
+    p.add_argument("--league", help="league file for roster settings (default: ESPN defaults, 10 teams)")
+    p.add_argument("--drafts", type=int, default=20)
+    p.add_argument("--sims", type=int, default=30)
+    p.add_argument("--candidates", type=int, default=8)
+    p.add_argument("--policies", nargs="+", default=["auto", "points", "greedy", "model"])
+    p.set_defaults(func=cmd_benchmark)
 
     p = sub.add_parser("capture", help="record ESPN draft-room traffic sent by the browser userscript")
     p.add_argument("--out", default="capture.jsonl")

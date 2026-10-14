@@ -30,7 +30,7 @@ from .lineup import assign_lineup, target_fill
 from .models import DraftState, Player, TeamProfile
 from .recommend import recommend
 from .room import RoomTracker
-from .simulate import availability
+from .simulate import availability, predict_picks
 
 PAGE = Path(__file__).parent / "web" / "index.html"
 
@@ -57,6 +57,8 @@ class Dashboard:
         self.wake = threading.Condition(self.lock)
         self.result: dict = {"version": -1}
         self.computing = False
+        self.predictions: list[dict] = []
+        self.pred_history: dict[int, dict[str, float]] = {}  # pick -> {player: P} predicted beforehand
         self.page_connected: float | None = None
         threading.Thread(target=self._worker, daemon=True).start()
 
@@ -91,6 +93,24 @@ class Dashboard:
                 self.computing = False
                 result["version"] = version
                 self.result = result
+            self._predict(st)
+
+    def _predict(self, st: DraftState) -> None:
+        """Likely players at each upcoming pick (for the pick strip), and a
+        record of what was predicted for each pick so it can be scored later."""
+        if st.is_complete:
+            return
+        mine = st.my_next_picks()
+        horizon = (mine[1] if len(mine) > 1 else st.league.total_picks) - st.current_pick + 2
+        try:
+            preds = predict_picks(st, sims=150, horizon=max(min(horizon, 24), 6))
+        except Exception:
+            traceback.print_exc()
+            return
+        with self.lock:
+            self.predictions = preds
+            for row in preds:
+                self.pred_history[row["pick"]] = dict(list(row["probs"].items())[:15])
 
     def _compute(self, st: DraftState) -> dict:
         if st.is_complete or not st.my_next_picks():
@@ -177,9 +197,53 @@ class Dashboard:
                 "positions": {"targets": lg.targets, "filled": filled,
                               "over": [p.name for p in over]},
                 "recent": recent[::-1],
+                "strip": self._strip(st),
                 "log": list(tr.recent_log)[-12:],
                 "result": self.result,
             }
+
+    def _strip(self, st: DraftState) -> dict:
+        """Pick strip: recent picks scored against what was predicted, then the
+        pick on the clock and upcoming picks with their most likely players."""
+        lg, tr = self.league, self.tracker
+        pick = st.current_pick
+
+        def brief(pid: str) -> dict:
+            p = self.players[pid]
+            return {"name": p.name, "pos": _pos(p)}
+
+        past = []
+        for i in range(max(0, pick - 4), pick):
+            pid, slot = st.picks[i], lg.team_for_pick(i)
+            pred = self.pred_history.get(i)
+            guess = next(iter(pred.items()), None) if pred else None
+            past.append({"pick": i + 1, "team": tr.name(slot), "mine": slot == lg.my_slot,
+                         "auto": i in st.auto_picks, **brief(pid),
+                         "p": None if pred is None or slot == lg.my_slot else pred.get(pid, 0.0),
+                         "guess": None if guess is None else {**brief(guess[0]), "p": guess[1]}})
+        upcoming = []
+        top_rec = (self.result.get("recs") or [None])[0]
+        for row in self.predictions:
+            if row["pick"] < pick:
+                continue
+            slot = row["team"]
+            upcoming.append({
+                "pick": row["pick"] + 1, "team": tr.name(slot), "mine": slot == lg.my_slot,
+                "auto": slot in st.auto_teams, "now": row["pick"] == pick,
+                "likely": [{**brief(pid), "p": p} for pid, p in list(row["probs"].items())[:3]],
+                "rec": top_rec["name"] if slot == lg.my_slot and top_rec and row["pick"] == st.my_next_picks()[0] else None,
+            })
+        # How well the model has predicted opponents' picks so far.
+        scored = [(self.pred_history[i], pid) for i, pid in enumerate(st.picks)
+                  if i in self.pred_history and lg.team_for_pick(i) != lg.my_slot]
+        accuracy = None
+        if scored:
+            accuracy = {
+                "picks": len(scored),
+                "top_hit": sum(next(iter(pr)) == pid for pr, pid in scored if pr) / len(scored),
+                "avg_p": sum(pr.get(pid, 0.0) for pr, pid in scored) / len(scored),
+            }
+        return {"past": past, "upcoming": upcoming, "accuracy": accuracy}
 
     def _team_tendencies(self, st: DraftState) -> list[dict | None]:
         """What each team's own (non-autodraft) picks so far suggest; cached per draft version."""

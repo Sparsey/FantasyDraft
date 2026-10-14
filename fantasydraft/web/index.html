@@ -58,6 +58,24 @@
   .msg { padding: 0 14px 7px; font-size: 12px; color: var(--muted); }
   .msg:empty { display: none; }
   .msg.err { color: var(--bad); }
+  /* pick strip */
+  .strip { display: flex; gap: 8px; overflow-x: auto; padding: 0 14px 10px; scroll-behavior: smooth; }
+  .strip:empty { display: none; }
+  .card { flex: none; width: 158px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px 7px; background: var(--bg); font-size: 12px; }
+  .card.past { width: 138px; }
+  .card.now { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 3px 0 var(--accent); }
+  .card.mine { background: var(--mine); border-color: var(--warn); }
+  .card .ch { display: flex; gap: 4px; align-items: baseline; color: var(--muted); font-size: 11px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; }
+  .card .ch b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .card .ch .tm { overflow: hidden; text-overflow: ellipsis; }
+  .card .ln { display: flex; justify-content: space-between; gap: 6px; line-height: 1.5; }
+  .card .ln span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .ln span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .card .act { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .pg { font-size: 11px; font-weight: 600; }
+  .pg.hi { color: var(--good); } .pg.mid { color: var(--warn); } .pg.lo { color: var(--bad); }
+  .card.acc { width: 112px; color: var(--muted); font-size: 11px; display: flex; flex-direction: column; justify-content: center; gap: 2px; background: none; }
+  .card.acc b { color: var(--ink); font-size: 13px; }
   .banner { display: none; padding: 7px 14px; background: var(--bad-soft); color: var(--bad); font-weight: 500; font-size: 13px; }
   .banner.show { display: block; }
 
@@ -163,6 +181,7 @@
     <div class="results" id="results"></div>
   </div>
   <div class="msg" id="msg"></div>
+  <div class="strip" id="strip"></div>
   <div class="banner" id="banner"></div>
 </div>
 
@@ -248,6 +267,7 @@ function render() {
   b.className = "banner" + (f.blocked ? " show" : "");
   b.textContent = f.blocked ? `Lost track of the draft (${f.blocked}). New picks are held until it catches up — open the draft room's Pick History, or Undo/enter picks here.` : "";
 
+  renderStrip();
   const r = S.result || {};
   $("spin").textContent = S.computing ? "updating…" : r.error || "";
   renderTable(r);
@@ -264,6 +284,41 @@ function render() {
   const log = $("log");
   const txt = S.log.join("\n");
   if (log.textContent !== txt) { log.textContent = txt; log.scrollTop = log.scrollHeight; }
+}
+
+let stripKey = "", stripPick = -1;
+function renderStrip() {
+  const T = S.strip;
+  const key = JSON.stringify(T);
+  if (key === stripKey) return;
+  stripKey = key;
+  const pcls = (p) => p >= 0.3 ? "hi" : p >= 0.1 ? "mid" : "lo";
+  const tag = (c) => c.auto ? '<span class="tag">AUTO</span>' : "";
+  let html = "";
+  if (T.accuracy) {
+    html += `<div class="card acc" title="Across ${T.accuracy.picks} opponent picks: how often the model's most likely player was the one taken, and the average chance it gave the actual pick">
+      <span>model's top guess right</span><b>${pct(T.accuracy.top_hit)}</b><span>avg chance of actual ${pct(T.accuracy.avg_p)}</span></div>`;
+  }
+  for (const c of T.past) {
+    const g = c.guess ? `Model's top guess: ${c.guess.name} (${pct(c.guess.p)})` : "No prediction recorded for this pick";
+    html += `<div class="card past${c.mine ? " mine" : ""}" title="${esc(g)}">
+      <div class="ch"><b>#${c.pick}</b><span class="tm">${esc(c.mine ? "You" : c.team)}</span>${tag(c)}</div>
+      <div class="act">${esc(c.name)}<span class="pos">${esc(c.pos)}</span></div>
+      ${c.p == null ? "" : `<div class="pg ${pcls(c.p)}">model gave ${pct(c.p)}</div>`}</div>`;
+  }
+  for (const c of T.upcoming) {
+    const head = `<div class="ch"><b>#${c.pick}</b><span class="tm">${c.now ? "ON CLOCK · " : ""}${esc(c.mine ? "YOU" : c.team)}</span>${tag(c)}</div>`;
+    const body = c.mine && c.rec ? `<div class="act" title="Top recommendation">→ ${esc(c.rec)}</div>`
+      : c.likely.map((x) => `<div class="ln"><span>${esc(x.name)}<span class="pos">${esc(x.pos)}</span></span><span>${pct(x.p)}</span></div>`).join("");
+    html += `<div class="card${c.now ? " now" : ""}${c.mine ? " mine" : ""}" ${c.now ? 'id="nowcard"' : ""}>${head}${body}</div>`;
+  }
+  const strip = $("strip");
+  strip.innerHTML = html;
+  if (S.status.pick !== stripPick) {  // new pick: bring the card on the clock into view
+    stripPick = S.status.pick;
+    const now = $("nowcard");
+    if (now) strip.scrollLeft = Math.max(0, now.offsetLeft - strip.offsetLeft - 2 * 146);
+  }
 }
 
 function renderLineup() {

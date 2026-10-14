@@ -457,3 +457,13 @@ def test_balanced_skips_a_position_it_has_filled():
     targets = {"PG": 3, "SG": 3, "SF": 3, "PF": 3, "C": 3}
     assert choose_pick(prof, pool, random.Random(0), 40, counts={"C": 1.0}, targets=targets).name == "c"
     assert choose_pick(prof, pool, random.Random(0), 40, counts={"C": 3.0}, targets=targets).name == "g"
+
+
+def test_predict_picks_autodrafter_is_certain():
+    from fantasydraft.simulate import predict_picks
+
+    state = _tiny_state(["auto", "adp"], my=1)
+    preds = predict_picks(state, sims=20, horizon=3)
+    assert [p["pick"] for p in preds] == [0, 1, 2]
+    assert preds[0]["probs"] == {"pg1": 1.0}  # autodraft takes the top ESPN rank
+    assert abs(sum(preds[1]["probs"].values()) - 1.0) < 1e-9
