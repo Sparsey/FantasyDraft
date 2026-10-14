@@ -302,19 +302,25 @@ function tagTxt(x) {
   if (x.falling) t += `<span class="ptag fall" title="ESPN ranks him well before your pick, but he has a real chance of lasting to you">FALLING</span>`;
   return t;
 }
-// Divider lines in the board (sorted by your projections): from the line down,
-// every player has at least that chance of still being there at your pick.
+// Divider lines in the board (sorted by your projections): each goes where it
+// best splits the list into "mostly under X% there" above and "mostly X%+ there"
+// below, so a single player ESPN loves more than you can't drag it to the end.
+function splitAt(recs, t) {
+  let best = -1, bestErr = Infinity;
+  for (let k = 0; k <= recs.length; k++) {
+    let err = 0;
+    recs.forEach((x, j) => { const ok = (x.p_now ?? 0) >= t; if (j < k ? ok : !ok) err++; });
+    if (err <= bestErr) { bestErr = err; best = k; }  // ties: the lower line (never overstate)
+  }
+  return best > 0 && best < recs.length ? best : (best === 0 ? 0 : -1);
+}
 function availLine(r, i, cols) {
   if (!S.status.picks_until || !r.recs.length || r.recs[0].p_now == null) return "";
-  const from = (t) => {  // first row from which every row below is at least t
-    let k = r.recs.length;
-    while (k > 0 && (r.recs[k - 1].p_now ?? 0) >= t) k--;
-    return k;
-  };
-  const at = S.status.my_next, lines = [];
-  if (from(0.9) === i) lines.push(["sure", `90%+ there at #${at} from here down`]);
-  else if (from(0.5) === i) lines.push(["half", `50%+ there at #${at} from here down`]);
-  return lines.map(([c, t]) => `<tr class="avl ${c}"><td colspan="${cols}"><span>${t}</span></td></tr>`).join("");
+  const at = S.status.my_next, sure = splitAt(r.recs, 0.9), half = splitAt(r.recs, 0.5);
+  const row = (c, t) => `<tr class="avl ${c}"><td colspan="${cols}"><span>${t}</span></td></tr>`;
+  if (sure === i) return row("sure", `mostly 90%+ there at #${at} from here down`);
+  if (half === i && half !== sure) return row("half", `mostly 50%+ there at #${at} from here down`);
+  return "";
 }
 function changeTxt(x) {
   if (x.p_change == null || Math.abs(x.p_change) < 0.05) return "";

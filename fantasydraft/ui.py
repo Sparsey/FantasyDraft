@@ -233,6 +233,7 @@ class Dashboard:
         espn_top = max(avail, key=lambda p: (p.room_points, p.proj_points), default=None)
         if espn_top is not None and espn_top not in shown:
             shown.append(espn_top)
+            shown.sort(key=lambda p: -p.proj_points)  # in its place on the board, not at the end
         return shown, espn_top
 
     def _board_row(self, st: DraftState, p: Player, probs: dict | None) -> dict:
