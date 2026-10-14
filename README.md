@@ -27,8 +27,9 @@ python -m fantasydraft watch --league examples/league.json
      `"players"` (or pass `--players <link>`).
    - **Local CSV:** download ESPN ranks, ADP and projected points (scored
      with your league's settings):
-     ```bash
-     export ESPN_S2=... ESPN_SWID='{...}'   # private leagues: cookies from espn.com
+     ```powershell
+     # private leagues: cookies from espn.com (PowerShell; bash: export ESPN_S2=...)
+     $env:ESPN_S2 = "..."; $env:ESPN_SWID = "{...}"
      python -m fantasydraft fetch-players --league-id 12345 --season 2027
      ```
 2. **League** — `python -m fantasydraft fetch-league --league-id 12345 --season 2027`
@@ -37,7 +38,7 @@ python -m fantasydraft watch --league examples/league.json
 
    | field | meaning |
    |---|---|
-   | `strategy` | `unknown` (default: modelled by whichever of adp/rank/points best fits their picks so far), `auto` (ESPN autodraft: best ESPN rank, deterministic), `adp` (drafts around ADP), `rank` (follows ESPN's board), `points` (drafts by projections), `balanced` (knowledgeable, builds a well-rounded team: projections scaled by roster need, low noise), `feel` (picks fairly evenly among ESPN's top `spread` players, default 8). Set it yourself when you know the person |
+   | `strategy` | `unknown` (default: modelled by whichever of adp/rank/points best fits their picks so far), `auto` (starts the draft on autodraft: the dashboard's autodraft switch begins on), `adp` (drafts around ADP), `rank` (follows ESPN's board), `points` (drafts by projections), `balanced` (knowledgeable, builds a well-rounded team: projections scaled by roster need, low noise), `feel` (picks fairly evenly among ESPN's top `spread` players, default 8). Set it yourself when you know the person |
    | `spread` | for `feel` teams: how many of ESPN's top-ranked players they choose among (default 8) |
    | `noise` | starting guess for how unpredictable they are (0.15 ≈ ±15% of draft slot). Updated from their own picks during the draft unless `learn_noise` is `false` |
    | `favorites` | `{"Player Name": 10}` → takes that player ~10 spots early |

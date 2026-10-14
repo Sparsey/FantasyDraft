@@ -377,6 +377,14 @@ def cmd_fetch_players(args) -> None:
     if args.dump:
         Path(args.dump).write_text(json.dumps(raw, indent=1))
     players = [p for r in raw if (p := parse_player(r, args.season, args.rank_type))]
+    out = Path(args.out)
+    if out.exists() and not args.force:
+        from .io import PLAYER_COLUMNS, read_text_file
+        header = {h.strip().lower() for h in read_text_file(out).split("\n", 1)[0].split(",")}
+        extra = sorted(header - set(PLAYER_COLUMNS) - {""})
+        if extra:
+            sys.exit(f"{out} has your own columns ({', '.join(extra)}), which this would erase. "
+                     "Use --out for a new file, or --force to overwrite.")
     save_players(players, args.out)
     source = "ESPN default scoring" if defaults else f"league {args.league_id} scoring"
     print(f"wrote {len(players)} players to {args.out} (projections: {source})")
@@ -716,6 +724,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--rank-type", default="STANDARD", help="ESPN draft rank list (STANDARD, POINTS, ...)")
     p.add_argument("--defaults", action="store_true",
                    help="use ESPN's default league (before your league is activated)")
+    p.add_argument("--force", action="store_true", help="overwrite --out even if it has your own columns")
     p.set_defaults(func=cmd_fetch_players)
 
     p = sub.add_parser("fetch-league", help="create/refresh league.json from ESPN settings")

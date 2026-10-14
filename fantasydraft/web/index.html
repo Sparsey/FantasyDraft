@@ -199,9 +199,9 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const pct = (x) => x == null ? "–" : x <= 0 ? "0%" : x >= 1 ? "100%" : x < 0.01 ? "<1%" : x > 0.99 ? ">99%" : Math.round(x * 100) + "%";
-const signed = (x) => (x > 0 ? "+" : "") + x;
+const signed = (x) => (x > 0 ? "+" : "") + (typeof x === "number" ? x.toLocaleString() : x);
 const STRATS = {unknown: "Unknown: learn from their picks", adp: "Around ADP", rank: "Follows ESPN rank, loosely", points: "By projected points", balanced: "Balanced builder: best value for their roster, avoids piling up a position", feel: "By feel: picks fairly evenly among ESPN's top ~8"};
-let S = null, players = [], playersVersion = -1, tab = "recs", clockAt = 0, sel = 0, lastRender = "";
+let S = null, players = [], playersVersion = -1, tab = "recs", clockAt = 0, sel = 0, lastRender = "", tableKey = "";
 
 function bar(p) {
   if (p == null) return "–";
@@ -284,21 +284,25 @@ function render() {
   const b = $("banner");
   b.className = "banner" + (f.blocked ? " show" : "");
   let missTxt = "";
-  if (f.blocked && f.missing) {
+  if (f.blocked && f.missing && f.missing[1]) {
     const [first, n] = f.missing;
-    missTxt = n ? (n === 1 ? `Pick #${first} is missing` : `Picks #${first}–#${first + n - 1} are missing`)
-                : `Some picks from #${first} on are missing`;
+    missTxt = n === 1 ? `Pick #${first} is missing` : `Picks #${first}–#${first + n - 1} are missing`;
   }
-  b.textContent = f.blocked ? `${missTxt || "Lost track of the draft"} (the page probably reloaded). ` +
-    `Enter ${missTxt ? "them" : "the missing picks"} in order in the box above (ESPN rank or name); ` +
-    `held picks then catch up by themselves. Opening the draft room's Pick History can also fix it.` : "";
+  const waiting = f.blocked && (!f.missing || f.missing[1] === 0);
+  b.textContent = !f.blocked ? "" : waiting
+    ? "Checking the pick count against the draft page… New picks are held until it matches. " +
+      "If this doesn't clear in a few seconds, open the draft room's Pick History."
+    : `${missTxt} (the page probably reloaded). Enter ${missTxt.includes("–") ? "them" : "it"} in order in the box above ` +
+      `(ESPN rank or name; someone not in your list can be entered by name too); held picks then catch up by themselves. ` +
+      `Opening the draft room's Pick History can also fix it.`;
 
   renderStrip();
   const r = S.result || {};
   $("undertab").hidden = !r.has_sources;
   $("spin").textContent = S.computing ? "updating…" : r.error || "";
   $("tablebody").style.opacity = r.stale ? "0.55" : "";
-  renderTable(r);
+  const tkey = JSON.stringify([tab, r, manual(), S.status.my_picks]);
+  if (tkey !== tableKey) { tableKey = tkey; renderTable(r); }
   renderAdvice(r.advice);
 
   // Re-render the slower-changing panels only when their data changed (keeps selects/scroll stable).
@@ -382,7 +386,7 @@ function renderTeams() {
       const cls = [t.me ? "me" : "", st.on_clock && st.on_clock.slot === t.slot ? "onclock" : ""].join(" ");
       return `<tr class="${cls}" title="${esc(teamTip(t))}">
         <td><span class="muted">${t.slot + 1}</span> <span class="nm">${esc(t.name)}${t.me ? " (you)" : ""}</span></td>
-        <td class="num ${t.score > 0 ? "up" : t.score < 0 ? "dn" : "muted"}">${t.count ? signed(t.score.toLocaleString()) : "–"}</td>
+        <td class="num ${t.score > 0 ? "up" : t.score < 0 ? "dn" : "muted"}">${t.count ? signed(t.score) : "–"}</td>
         <td class="num">${t.count ? `${t.starters.toLocaleString()} <span class="muted">#${t.starters_rank}</span>` : "–"}</td>
         <td>${t.me ? "" : `<select data-slot="${t.slot}">${opts}</select><span class="model">${modelTxt(t)}</span>`}</td>
         <td><span class="toggle${t.auto ? " on" : ""}" data-slot="${t.slot}" data-on="${t.auto ? 0 : 1}">${t.auto ? "AUTO" : ""}<span class="sw"></span></span></td>
@@ -436,13 +440,13 @@ setInterval(() => {
 document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
   tab = b.dataset.tab;
   document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
-  if (S) renderTable(S.result || {});
+  if (S) { tableKey = ""; renderTable(S.result || {}); }
 });
 
 // ----- actions -----
 function showMsg(text, err) { const m = $("msg"); m.textContent = text; m.className = "msg" + (err ? " err" : ""); }
-async function record(id) {
-  const res = await api("/api/pick", {id});
+async function record(id, name) {
+  const res = await api("/api/pick", id ? {id} : {name});
   showMsg(res.ok ? res.message.replace(/\s+/g, " ").trim() + " — wrong? Undo" : res.error, !res.ok);
   $("q").value = ""; $("results").className = "results";
   refresh();
@@ -466,7 +470,9 @@ function drawResults() {
   box.innerHTML = list.map((p, i) => `<div class="${i === sel ? "sel" : ""}" data-pick="${esc(p.id)}">
       <span class="pname">${esc(p.name)}</span><span class="pos">${esc(p.pos)} ${esc(p.team || "")}</span>
       <span class="muted" style="margin-left:auto">rank ${p.rank ?? "–"} · ${p.proj}</span></div>`).join("")
-    || ($("q").value.trim() ? `<div class="muted">No available player matches</div>` : "");
+    || ($("q").value.trim() && !/^\d+$/.test($("q").value.trim())
+        ? `<div data-unlisted="${esc($("q").value.trim())}">No match. Record <b>&nbsp;${esc($("q").value.trim())}&nbsp;</b> as a player not in your list</div>`
+        : $("q").value.trim() ? `<div class="muted">No available player with that rank</div>` : "");
   box.className = "results" + (box.innerHTML ? " show" : "");
 }
 $("q").addEventListener("input", () => { sel = 0; drawResults(); });
@@ -475,9 +481,16 @@ $("q").addEventListener("keydown", (e) => {
   if (e.key === "ArrowDown") { sel = Math.min(sel + 1, list.length - 1); drawResults(); e.preventDefault(); }
   else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); drawResults(); e.preventDefault(); }
   else if (e.key === "Enter" && list[sel]) record(list[sel].id);
+  else if (e.key === "Enter" && !list.length && $("q").value.trim() && !/^\d+$/.test($("q").value.trim())
+           && confirm(`Record "${$("q").value.trim()}" as pick #${S.status.pick}? (not in your players list)`)) record(null, $("q").value.trim());
   else if (e.key === "Escape") $("results").className = "results";
 });
 document.addEventListener("click", (e) => {
+  const unl = e.target.closest("[data-unlisted]");
+  if (unl) {
+    if (confirm(`Record "${unl.dataset.unlisted}" as pick #${S.status.pick}? (not in your players list)`)) record(null, unl.dataset.unlisted);
+    return;
+  }
   const pick = e.target.closest("[data-pick]");
   if (pick) {
     const live = S && S.feed.last_message_age != null && S.feed.last_message_age < 20;
@@ -494,9 +507,15 @@ document.addEventListener("change", (e) => {
   if (e.target.matches("select[data-slot]")) setStrategy(Number(e.target.dataset.slot), e.target.value);
 });
 $("undo").onclick = async () => {
-  const res = await api("/api/undo", {});
-  showMsg(res.ok ? res.message : res.error, !res.ok);
-  refresh();
+  const btn = $("undo");
+  if (btn.disabled) return;
+  if (!manual() && !confirm("The draft room feed is live, so picks come in by themselves. Undo the last entry anyway?")) return;
+  btn.disabled = true;
+  try {
+    const res = await api("/api/undo", {});
+    showMsg(res.ok ? res.message : res.error, !res.ok);
+    await refresh();
+  } finally { setTimeout(() => { btn.disabled = false; }, 800); }
 };
 
 refresh();

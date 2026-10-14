@@ -16,7 +16,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from .analyze import analyze
-from .espn import EspnClient, merge_draft_ranks, parse_player
+from .espn import EspnClient, parse_player
 from .io import apply_log, placeholder_player
 from .learn import fit_teams
 from .models import DEFAULT_ROSTER_SLOTS, DraftState, League, Player, TeamProfile

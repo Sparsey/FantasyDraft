@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -26,7 +27,7 @@ from .analyze import analyze, draft_scores
 from .drafters import add_to_counts, full_positions
 from .io import apply_log, apply_manager, is_placeholder, league_managers, load_state, match_manager
 from .learn import fit_teams
-from .lineup import assign_lineup, over_targets, target_fill
+from .lineup import over_targets, target_fill
 from .models import DraftState, Player, TeamProfile
 from .recommend import availability_sims, pick_gamble, recommend, versus_highest_projection
 from .room import RoomTracker
@@ -78,7 +79,7 @@ class Dashboard:
     # --- state -----------------------------------------------------------------
 
     def state(self) -> DraftState:
-        st = DraftState(self.league, self.players)
+        st = DraftState(self.league, dict(self.players))
         apply_log(st, self.tracker.entries)
         return st
 
@@ -104,6 +105,12 @@ class Dashboard:
                 result["version"] = version
                 self.result = result
             self._predict(st)
+            try:
+                rows = self._compute_tendencies(st)
+                with self.lock:
+                    self._tendencies = (version, rows)
+            except Exception:
+                traceback.print_exc()
 
     def _predict(self, st: DraftState) -> None:
         """Likely players at each upcoming pick (for the pick strip), and a
@@ -245,85 +252,76 @@ class Dashboard:
         } for p in rows[:25]]
 
     def snapshot(self) -> dict:
+        # Only quick reads under the lock: the draft feed waits on it.
         with self.lock:
             tr = self.tracker
             st = self.state()
             lg = self.league
-            pick = st.current_pick
-            mine = st.my_next_picks()
-            rosters = st.rosters()
-            scores = draft_scores(st)
-            owners, bench = assign_lineup(rosters[lg.my_slot], lg.starting_slots)
-            on_clock = lg.team_for_pick(pick) if not st.is_complete else None
-            recent = []
-            for i in range(max(0, pick - 30), pick):
-                p = self.players[st.picks[i]]
-                slot = lg.team_for_pick(i)
-                recent.append({"pick": i + 1, "team": tr.name(slot), "slot": slot, "name": p.name,
-                               "pos": _pos(p), "auto": i in st.auto_picks, "mine": slot == lg.my_slot})
-            suggestion = self.players.get(tr.suggestion) if tr.suggestion else None
-            filled, over = target_fill(rosters[lg.my_slot], lg)
-            tendencies = self._team_tendencies(st)
-            team_counts = []
-            for roster in rosters:
-                counts: dict[str, float] = {}
-                for p in roster:
-                    add_to_counts(counts, p)
-                team_counts.append(counts)
-            return {
-                "version": tr.version,
-                "computing": self.computing or self.result["version"] != tr.version,
-                "status": {
-                    "pick": pick + 1, "round": pick // lg.num_teams + 1, "rounds": lg.rounds,
-                    "teams": lg.num_teams, "complete": st.is_complete,
-                    "on_clock": None if on_clock is None else {"slot": on_clock, "name": tr.name(on_clock)},
-                    "my_next": mine[0] + 1 if mine else None,
-                    "picks_until": mine[0] - pick if mine else None,
-                    "my_picks": [m + 1 for m in mine],
-                    "seconds_left": tr.seconds_left(),
-                },
-                "feed": {
-                    "connected": self.page_connected is not None,
-                    "last_message_age": None if tr.last_feed is None else time.time() - tr.last_feed,
-                    "blocked": tr.blocked,
-                    "missing": tr.missing(),
-                },
-                "suggestion": None if suggestion is None else {"id": suggestion.id, "name": suggestion.name,
-                                                               "pos": _pos(suggestion)},
-                "me": {"slot": lg.my_slot, "name": tr.name(lg.my_slot)},
-                "lineup": [{"slot": s, "name": p.name if p else None, "pos": _pos(p) if p else "",
-                            "proj": round(p.proj_points) if p else None}
-                           for s, p in zip(lg.starting_slots, owners)],
-                "bench": [{"name": p.name, "pos": _pos(p), "proj": round(p.proj_points)} for p in bench],
-                "bench_slots": lg.roster_slots.get("BE", 0),
-                "teams": [{
-                    "score": round(scores[i]["value"]), "starters": round(scores[i]["starters"]),
-                    "starters_rank": 1 + sum(s["starters"] > scores[i]["starters"] for s in scores),
-                    "slot": i, "name": tr.name(i), "strategy": t.strategy, "noise": t.noise,
-                    "manager": t.manager, "view": t.view, "favorite_team": t.favorite_team,
-                    "auto": i in st.auto_teams, "me": i == lg.my_slot, "count": len(rosters[i]),
-                    "last": rosters[i][-1].name if rosters[i] else None,
-                    "observed": tendencies[i],
-                    "modelled_as": (tendencies[i] or {}).get("used") or
-                                   ("adp" if t.strategy == "unknown" else t.strategy),
-                    "full": sorted(full_positions(team_counts[i], lg.targets)),
-                } for i, t in enumerate(lg.teams)],
-                "positions": {"targets": lg.targets, "filled": filled,
-                              "over": [p.name for p in over]},
-                "recent": recent[::-1],
-                "strip": self._strip(st),
-                "log": list(tr.recent_log)[-12:],
-                "result": self._current_result(st),
+            version = tr.version
+            names = [tr.name(i) for i in range(lg.num_teams)]
+            computing = self.computing or self.result["version"] != version
+            feed = {
+                "connected": self.page_connected is not None,
+                "last_message_age": None if tr.last_feed is None else time.time() - tr.last_feed,
+                "blocked": tr.blocked,
+                "missing": tr.missing(),
             }
+            seconds_left = tr.seconds_left()
+            log = list(tr.recent_log)[-12:]
+            result = self._current_result(st)
+            strip = self._strip(st, result)
+            tendencies = self._tendencies[1] or [None] * lg.num_teams
+        pick = st.current_pick
+        mine = st.my_next_picks()
+        rosters = st.rosters()
+        scores = draft_scores(st)
+        on_clock = lg.team_for_pick(pick) if not st.is_complete else None
+        filled, over = target_fill(rosters[lg.my_slot], lg)
+        team_counts = []
+        for roster in rosters:
+            counts: dict[str, float] = {}
+            for p in roster:
+                add_to_counts(counts, p)
+            team_counts.append(counts)
+        return {
+            "version": version,
+            "computing": computing,
+            "status": {
+                "pick": pick + 1, "round": pick // lg.num_teams + 1, "rounds": lg.rounds,
+                "teams": lg.num_teams, "complete": st.is_complete,
+                "on_clock": None if on_clock is None else {"slot": on_clock, "name": names[on_clock]},
+                "my_next": mine[0] + 1 if mine else None,
+                "picks_until": mine[0] - pick if mine else None,
+                "my_picks": [m + 1 for m in mine],
+                "seconds_left": seconds_left,
+            },
+            "feed": feed,
+            "me": {"slot": lg.my_slot, "name": names[lg.my_slot]},
+            "teams": [{
+                "score": round(scores[i]["value"]), "starters": round(scores[i]["starters"]),
+                "starters_rank": 1 + sum(s["starters"] > scores[i]["starters"] for s in scores),
+                "slot": i, "name": names[i], "strategy": t.strategy, "noise": t.noise,
+                "manager": t.manager, "view": t.view, "favorite_team": t.favorite_team,
+                "auto": i in st.auto_teams, "me": i == lg.my_slot, "count": len(rosters[i]),
+                "last": rosters[i][-1].name if rosters[i] else None,
+                "observed": tendencies[i] if i < len(tendencies) else None,
+                "full": sorted(full_positions(team_counts[i], lg.targets)),
+            } for i, t in enumerate(lg.teams)],
+            "positions": {"targets": lg.targets, "filled": filled,
+                          "over": [p.name for p in over]},
+            "strip": strip,
+            "log": log,
+            "result": result,
+        }
 
-    def _strip(self, st: DraftState) -> dict:
+    def _strip(self, st: DraftState, result: dict) -> dict:
         """Pick strip: recent picks scored against what was predicted, then the
         pick on the clock and upcoming picks with their most likely players."""
         lg, tr = self.league, self.tracker
         pick = st.current_pick
 
         def brief(pid: str) -> dict:
-            p = self.players[pid]
+            p = st.players[pid]
             return {"name": p.name, "pos": _pos(p)}
 
         past = []
@@ -336,7 +334,8 @@ class Dashboard:
                          "p": None if pred is None or slot == lg.my_slot else pred.get(pid, 0.0),
                          "guess": None if guess is None else {**brief(guess[0]), "p": guess[1]}})
         upcoming = []
-        top_rec = (self.result.get("recs") or [None])[0]
+        top_rec = (result.get("recs") or [None])[0]  # already without anyone just drafted
+        taken = set(st.picks)
         for row in self.predictions:
             if row["pick"] < pick:
                 continue
@@ -344,7 +343,7 @@ class Dashboard:
             upcoming.append({
                 "pick": row["pick"] + 1, "team": tr.name(slot), "mine": slot == lg.my_slot,
                 "auto": slot in st.auto_teams, "now": row["pick"] == pick,
-                "likely": [{**brief(pid), "p": p} for pid, p in list(row["probs"].items())[:3]],
+                "likely": [{**brief(pid), "p": p} for pid, p in row["probs"].items() if pid not in taken][:3],
                 "rec": top_rec["name"] if slot == lg.my_slot and top_rec and row["pick"] == st.my_next_picks()[0] else None,
             })
         # How well the model has predicted opponents' picks so far.
@@ -359,33 +358,26 @@ class Dashboard:
             }
         return {"past": past, "upcoming": upcoming, "accuracy": accuracy}
 
-    def _team_tendencies(self, st: DraftState) -> list[dict | None]:
-        """What each team's own (non-autodraft) picks so far suggest; cached per draft version."""
-        version = self.tracker.version
-        if self._tendencies[0] != version:
-            fits = fit_teams(st) if st.picks else {}
-            rows = []
-            for i, t in enumerate(analyze(st)):
-                f = fits.get(i)
-                if t.picks == 0:
-                    rows.append(None)
-                    continue
-                best = max(f.fit, key=f.fit.get) if f else None
-                # A team that always takes the top ESPN rank looks like autodraft.
-                suggested = "rank" if t.picks >= 3 and t.top_rank_rate >= 0.9 else \
-                    best if f and f.fit[best] >= 0.6 else None
-                rows.append({
-                    "picks": t.picks, "auto_picks": t.auto_picks,
-                    "top_rank": round(t.top_rank_rate, 2), "vs_adp": round(t.reach_vs_adp, 1),
-                    "fit": {k: round(v, 2) for k, v in f.fit.items()} if f else None,
-                    "best": best, "best_p": round(f.fit[best], 2) if f else None,
-                    "noise": f.noise if f else None, "prior_noise": f.prior_noise if f else None,
-                    "used": f.strategy if f else None,
-                    "mix": [[s, round(p, 2)] for s, (p, _) in f.mix.items()] if f else None,
-                    "suggested": suggested,
-                })
-            self._tendencies = (version, rows)
-        return self._tendencies[1]
+    def _compute_tendencies(self, st: DraftState) -> list[dict | None]:
+        """What each team's own (non-autodraft) picks so far suggest (run by the worker)."""
+        fits = fit_teams(st) if st.picks else {}
+        rows = []
+        for i, t in enumerate(analyze(st)):
+            f = fits.get(i)
+            if t.picks == 0:
+                rows.append(None)
+                continue
+            best = max(f.fit, key=f.fit.get) if f else None
+            rows.append({
+                "picks": t.picks, "auto_picks": t.auto_picks,
+                "top_rank": round(t.top_rank_rate, 2), "vs_adp": round(t.reach_vs_adp, 1),
+                "fit": {k: round(v, 2) for k, v in f.fit.items()} if f else None,
+                "best": best, "best_p": round(f.fit[best], 2) if f else None,
+                "noise": f.noise if f else None, "prior_noise": f.prior_noise if f else None,
+                "used": f.strategy if f else None,
+                "mix": [[s, round(p, 2)] for s, (p, _) in f.mix.items()] if f else None,
+            })
+        return rows
 
     def set_strategy(self, slot: int, strategy: str) -> str:
         """Change a team's saved strategy, here and in the league file."""
@@ -433,7 +425,10 @@ class Dashboard:
         with self.lock:
             tr = self.tracker
             if path == "/api/pick":
-                msg = tr.manual_pick(str(body["id"]))
+                if body.get("id"):
+                    msg = tr.manual_pick(str(body["id"]))
+                else:  # someone not in your players list
+                    msg = tr.manual_pick(name=str(body.get("name", "")).strip() or None)
             elif path == "/api/undo":
                 msg = "undid " + tr.undo()
             elif path == "/api/auto":
@@ -514,9 +509,22 @@ def open_window(url: str, app_window: bool = True) -> None:
 
 def serve(dash: Dashboard, port: int = 8765, open_browser: bool = True, app_window: bool = True) -> None:
     class Handler(BaseHTTPRequestHandler):
+        def _origin_ok(self, page_feed: bool) -> bool:
+            """Only the dashboard itself may use the API; the draft feed may also
+            come from ESPN's pages (via the userscript). Other websites may not."""
+            origin = self.headers.get("Origin")
+            if not origin or origin == "null":
+                return True  # not from a web page (the userscript's requests, curl)
+            own = (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
+            if origin in own or origin.startswith(("chrome-extension://", "moz-extension://")):
+                return True
+            return page_feed and re.match(r"https://([a-z0-9-]+\.)*espn\.com$", origin) is not None
+
         def _send(self, code: int, body: bytes = b"", ctype: str = "application/json") -> None:
             self.send_response(code)
-            self.send_header("Access-Control-Allow-Origin", "*")
+            origin = self.headers.get("Origin")
+            if origin and self._origin_ok(page_feed=True):
+                self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.send_header("Access-Control-Allow-Private-Network", "true")
@@ -548,13 +556,16 @@ def serve(dash: Dashboard, port: int = 8765, open_browser: bool = True, app_wind
                 self._send(404)
 
         def do_POST(self) -> None:  # noqa: N802
+            path = self.path.split("?")[0]
+            if not self._origin_ok(page_feed=path == "/log"):
+                self._send(403)
+                return
             length = int(self.headers.get("Content-Length", 0))
             try:
                 body = json.loads(self.rfile.read(length) or b"{}")
             except json.JSONDecodeError:
                 self._json({"ok": False, "error": "bad JSON"}, 400)
                 return
-            path = self.path.split("?")[0]
             if path == "/log":  # from the userscript
                 dash.feed(body if isinstance(body, list) else [body])
                 self._send(204)

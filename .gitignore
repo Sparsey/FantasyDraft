@@ -6,6 +6,7 @@ __pycache__/
 # per-draft working files (may contain league data)
 /league.json
 /picks.txt
+*.teams.json
 /data/players.csv
 espn_dump*.json
 /capture*.jsonl

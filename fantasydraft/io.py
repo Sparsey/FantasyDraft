@@ -430,7 +430,16 @@ def players_source(league_path: str | Path) -> str:
     """Where to load players from when --players isn't given: league.json's
     "players" entry (a file path or Google Sheets link), else data/players.csv."""
     cfg = json.loads(Path(league_path).read_text(encoding="utf-8-sig"))
-    return cfg.get("players", "data/players.csv")
+    return _near(cfg.get("players", "data/players.csv"), league_path)
+
+
+def _near(path: str, league_path: str | Path) -> str:
+    """A relative path from the league file: from the current folder if it's
+    there, else next to the league file (so commands work from any folder)."""
+    if path.startswith(("http://", "https://")) or Path(path).is_absolute() or Path(path).exists():
+        return path
+    beside = Path(league_path).parent / path
+    return str(beside) if beside.exists() else path
 
 
 def league_sources(league_path: str | Path) -> tuple[dict[str, str], dict[str, float] | None]:

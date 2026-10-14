@@ -272,6 +272,7 @@ def test_room_tracker_replays_real_espn_mock(tmp_path):
     picks.write_text("".join(f"unknown:early{i}\n" for i in range(30)))
     lines = []
     tracker = RoomTracker(league, players, picks, log=lines.append)
+    tracker.handle_page_text("ON THE CLOCK: PICK 31")  # the page confirms the 30 picks we resume with
     feed = (ROOT / "tests" / "data" / "espn_room_mock1.txt").read_text().splitlines()
     for msg in feed:
         if msg and not msg.startswith("#"):
@@ -841,3 +842,138 @@ def test_rolling_draft_score():
     s = draft_scores(st)
     assert s[0]["value"] == -100 + 0 and s[1]["value"] == +100
     assert s[0]["starters"] == 900 and s[1]["starters"] == 1000
+
+
+def test_room_restart_waits_for_page_before_mapping_new_teams(tmp_path):
+    from fantasydraft.room import RoomTracker
+
+    players = load_players(SAMPLE)
+    ids = sorted(players, key=lambda p: players[p].espn_rank)
+    league = League([TeamProfile(f"Team {i + 1}") for i in range(10)], my_slot=7)
+    espn = [3, 7, 1, 9, 4, 10, 2, 8, 5, 6]  # ESPN team id of each draft slot
+    picks = tmp_path / "p.txt"
+    picks.write_text("".join(f"{ids[k]}\n" for k in range(12)))
+    tr = RoomTracker(league, players, picks, log=lambda _: None)
+    for k in (14, 15):  # restarted after pick 12; picks 13 and 14 were missed
+        t = espn[league.team_for_pick(k)]
+        tr.handle_message(f"SELECTING {t} 60000")
+        tr.handle_message(f"SELECTED {t} {ids[k]} 1 m")
+    assert len(tr.picks) == 12 and tr.blocked
+    tr.handle_page_text("ON THE CLOCK: PICK 17")
+    assert tr.missing() == (13, 2)
+    tr.manual_pick(ids[12])
+    tr.manual_pick(ids[13])
+    assert not tr.blocked and tr.picks == ids[:16]
+    assert tr.team_slot == {espn[league.team_for_pick(14)]: league.team_for_pick(14),
+                            espn[league.team_for_pick(15)]: league.team_for_pick(15)}
+    # the mapping survives another restart
+    again = RoomTracker(league, players, picks, log=lambda _: None)
+    assert again.team_slot == tr.team_slot
+
+
+def test_room_resync_keeps_mapping_and_autodraft(tmp_path):
+    from fantasydraft.room import RoomTracker
+
+    players = load_players(SAMPLE)
+    ids = sorted(players, key=lambda p: players[p].espn_rank)
+    league = League([TeamProfile(f"Team {i + 1}") for i in range(10)], my_slot=7)
+    espn = [3, 7, 1, 9, 4, 10, 2, 8, 5, 6]
+    tr = RoomTracker(league, players, tmp_path / "p.txt", log=lambda _: None)
+    for k in range(12):
+        t = espn[league.team_for_pick(k)]
+        tr.handle_message(f"SELECTING {t} 60000")
+        tr.handle_message(f"SELECTED {t} {ids[k]} 1" + ("" if k == 3 else " m"))  # pick 4 by autodraft
+    assert league.team_for_pick(3) in tr.auto_slots()
+    # page reload: picks 13-14 missed; 15-16 arrive; then the page's pick list
+    for k in (14, 15):
+        t = espn[league.team_for_pick(k)]
+        tr.handle_message(f"SELECTING {t} 60000")
+        tr.handle_message(f"SELECTED {t} {ids[k]} 1 m")
+    assert tr.blocked
+    n = league.num_teams
+    lines = [f"{players[ids[k]].name} / BOS PG\nR{k // n + 1}, P{k % n + 1} - Team" for k in range(16)]
+    tr.handle_page_text("\n".join(lines) + "\nON THE CLOCK: PICK 17")
+    assert not tr.blocked and tr.picks == ids[:16]
+    assert league.team_for_pick(3) in tr.auto_slots()  # still on autodraft
+
+
+def test_players_sheet_problems_are_reported_not_fatal(tmp_path, capsys):
+    import pytest
+    from fantasydraft.io import load_players
+
+    html = tmp_path / "login.csv"
+    html.write_text("<!DOCTYPE html><html>Sign in</html>")
+    with pytest.raises(ValueError, match="Anyone with the link"):
+        load_players(html)
+    f = tmp_path / "p.csv"
+    f.write_text("﻿id,name,positions,proj_points,espn_rank,adp,notes\n"
+                 "1,A One,PG,2000,1,N/A,ok\n"
+                 "2,B Two,XX,1900,2,2,bad position\n"
+                 "3,C Three,C,1800,3,-,a, stray comma\n"
+                 "4,A One,PG,1700,4,4,same name\n", encoding="utf-8")
+    players = load_players(f)
+    assert set(players) == {"1", "3", "4"} and players["1"].adp == float("inf")
+    err = capsys.readouterr().err
+    assert "left out 1 rows" in err and "same player name" in err
+
+
+def test_name_and_link_normalising():
+    from fantasydraft.io import _norm, sheet_csv_url
+    from fantasydraft.sources import _key
+
+    assert _norm("P.J. Washington") == _norm("PJ Washington") == "pj washington"
+    assert _norm("Jaren Jackson Jr.") == "jaren jackson"
+    assert sheet_csv_url("https://docs.google.com/spreadsheets/d/e/2PACX-x/pubhtml?gid=5") == \
+        "https://docs.google.com/spreadsheets/d/e/2PACX-x/pub?output=csv&gid=5"
+    assert _key("3P%") is None and _key("TOV%") is None and _key("FG%") == "FG%" and _key("3PM") == "3PM"
+
+
+def test_hand_entry_of_unlisted_player(tmp_path):
+    from fantasydraft.io import load_log
+    from fantasydraft.room import RoomTracker
+
+    players = load_players(SAMPLE)
+    league = League([TeamProfile(f"T{i}") for i in range(10)], 0)
+    tr = RoomTracker(league, players, tmp_path / "p.txt", log=lambda _: None)
+    tr.manual_pick(name="Some Rookie")
+    assert len(tr.picks) == 1
+    assert len(load_log(tmp_path / "p.txt", dict(players), league)) == 1  # survives a restart
+
+
+def test_fetch_league_keeps_your_edits(tmp_path, monkeypatch):
+    import argparse
+    import json
+    import fantasydraft.espn as espn
+    from fantasydraft.cli import cmd_fetch_league
+
+    order = [[11, 12, 13], [13, 11, 12]]  # ESPN reshuffles the draft order
+
+    class Fake:
+        def __init__(self, *a):
+            pass
+
+        def league(self):
+            return {}
+
+        team_names = staticmethod(lambda d: {11: "Alpha", 12: "Bravo v2", 13: "Mine"})
+        team_owners = staticmethod(lambda d: {13: "Aaron Solomon"})
+        pick_order = staticmethod(lambda d: order[0])
+        roster_slots = staticmethod(lambda d: {"PG": 1, "BE": 1})
+        scoring = staticmethod(lambda d: {})
+
+    monkeypatch.setattr(espn, "EspnClient", Fake)
+    out = tmp_path / "league.json"
+    out.write_text(json.dumps({
+        "players": "sheet", "my_team": 3, "position_targets": {"C": 2}, "sources": {"fp": "x"},
+        "teams": [{"name": "Alpha", "strategy": "adp"}, {"name": "Bravo", "espn_id": 12, "strategy": "feel"},
+                  {"name": "Mine"}]}))
+    args = argparse.Namespace(league_id=1, season=2027, espn_s2=None, swid=None, dump=None, out=str(out))
+    cmd_fetch_league(args)
+    order.reverse()
+    cmd_fetch_league(args)
+    cfg = json.loads(out.read_text())
+    assert cfg["position_targets"] == {"C": 2} and cfg["sources"] == {"fp": "x"} and cfg["players"] == "sheet"
+    assert [t["name"] for t in cfg["teams"]] == ["Mine", "Alpha", "Bravo v2"]
+    assert cfg["my_team"] == "Mine"
+    bravo = cfg["teams"][2]
+    assert bravo["strategy"] == "feel" and bravo["espn_id"] == 12  # renamed on ESPN, still matched

@@ -15,7 +15,7 @@ Works for ESPN mock drafts and real league drafts alike.
      **Developer mode** on the extensions page instead.
 2. Tampermonkey dashboard → **+** (new script). Replace the template with all
    of [`espn_draft_capture.user.js`](espn_draft_capture.user.js), and save. Check
-   it shows **version 0.3** or later.
+   it shows **version 0.5** or later (to update, replace the whole script and save).
 3. The script only runs on espn.com pages with "draft" in the address, and
    only sends data to your own computer (`127.0.0.1`).
 

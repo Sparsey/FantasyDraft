@@ -17,6 +17,7 @@ to the picks file (as @auto/@back lines), which `watch` and `draft` read.
 """
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections import deque
@@ -50,6 +51,18 @@ class RoomTracker:
         self.last_feed: float | None = None  # time of the last draft-room message
         self.recent_log: deque[str] = deque(maxlen=60)
         self.page_done: int | None = None  # picks made so far, per the draft page
+        self._replaying = False  # replaying held messages: their clock values are stale
+        self.resumed = bool(self.entries)  # restarted mid-draft: picks may have been missed meanwhile
+        # The ESPN team id -> slot mapping is kept next to the picks file, so a
+        # restart mid-draft doesn't have to relearn it from whoever is on the clock.
+        self.map_path = self.path.with_name(self.path.name + ".teams.json")
+        if self.entries and self.map_path.exists():
+            try:
+                saved = json.loads(self.map_path.read_text(encoding="utf-8"))
+                if saved.get("first_pick") == self.picks[0]:  # same draft, not a reused file name
+                    self.team_slot = {int(k): int(v) for k, v in saved["teams"].items()}
+            except (ValueError, OSError, AttributeError, KeyError, IndexError, TypeError):
+                self.team_slot = {}
         outer_log = log
 
         def _log(line: str) -> None:
@@ -88,7 +101,11 @@ class RoomTracker:
 
     # --- manual control (UI) ------------------------------------------------------
 
-    def manual_pick(self, pid: str) -> str:
+    def manual_pick(self, pid: str | None = None, name: str | None = None) -> str:
+        """Record the next pick by hand. `name` records someone missing from
+        your players list (kept as a placeholder so later picks stay aligned)."""
+        if pid is None and name:
+            pid = self._unlisted(name)
         if pid not in self.players:
             raise ValueError(f"unknown player {pid}")
         if pid in self.picks:
@@ -106,6 +123,11 @@ class RoomTracker:
             self.try_release()
         return line
 
+    def _unlisted(self, name: str) -> str:
+        pid = "unlisted-" + (_norm(name).replace(" ", "-") or "player")
+        self.players.setdefault(pid, placeholder_player(pid))
+        return pid
+
     def missing(self) -> tuple[int, int | None] | None:
         """While out of sync: (first missing pick number, how many are missing or None if unknown)."""
         if not self.blocked:
@@ -119,12 +141,22 @@ class RoomTracker:
     def try_release(self) -> None:
         """Replay held feed messages now that missing picks may have been filled in
         by hand; if they still don't line up, we stay held."""
+        held = sum(1 for m in self.buffer if m.startswith("SELECTED"))
+        if self.page_done is not None and len(self.picks) + held < self.page_done:
+            return  # still missing picks: replaying now would put held picks on the wrong teams
         pending, self.buffer = self.buffer, []
         self.blocked = None
-        for data in pending:
-            self.handle_message(data)
+        self._replay(pending)
         if not self.blocked:
             self.log("Back in sync.")
+
+    def _replay(self, messages: list[str]) -> None:
+        self._replaying = True
+        try:
+            for data in messages:
+                self.handle_message(data)
+        finally:
+            self._replaying = False
 
     def undo(self) -> str:
         if not self.entries:
@@ -134,6 +166,8 @@ class RoomTracker:
         what = self.players[last[1]].name if last[0] == "pick" else \
             f"{self.name(last[1])} {'auto' if last[2] else 'back'}"
         self.log(f"   undid: {what}")
+        if self.blocked:
+            self.try_release()
         return what
 
     def manual_auto(self, slot: int, on: bool) -> None:
@@ -154,13 +188,21 @@ class RoomTracker:
             if slot in self.team_slot.values():
                 return False
             self.team_slot[team_id] = slot
+            self._save_map()
             if team_id == self.my_team_id and slot != self.league.my_slot:
                 self.log(f"!! ESPN says you draft #{slot + 1}, but your league file says "
                          f"#{self.league.my_slot + 1}. Recreate it with new-league --my-pick {slot + 1}.")
-            if team_id in self.pending_auto:
-                self._set_auto(slot, self.pending_auto.pop(team_id))
+            if team_id in self.pending_auto and self._set_auto(slot, self.pending_auto.pop(team_id)):
+                self._save()
             return True
         return known == slot
+
+    def _save_map(self) -> None:
+        try:
+            first = self.picks[0] if self.picks else None
+            self.map_path.write_text(json.dumps({"first_pick": first, "teams": self.team_slot}), encoding="utf-8")
+        except OSError:
+            pass  # only a convenience for restarts
 
     def _set_auto(self, slot: int, on: bool) -> bool:
         if on == (slot in self.auto_slots()):
@@ -184,25 +226,35 @@ class RoomTracker:
     # --- feed ------------------------------------------------------------------
 
     def handle_message(self, data: str) -> None:
-        if self.blocked:
-            self.buffer.append(data)
-            return
         parts = str(data).split()
         if not parts:
             return
         kind = parts[0]
-        self.last_feed = time.time()
+        if not self._replaying:
+            self.last_feed = time.time()
+            try:  # the countdown keeps running even while picks are held
+                if kind in ("CLOCK", "SELECTING") and len(parts) >= 3:
+                    self.clock = (time.time(), int(parts[2]) / 1000)
+            except ValueError:
+                pass
+        if self.blocked:
+            self.buffer.append(data)
+            return
         try:
-            if kind == "CLOCK" and len(parts) >= 3:
-                self.clock = (time.time(), int(parts[2]) / 1000)
-            elif kind == "SELECTING" and len(parts) >= 3:
-                self.clock = (time.time(), int(parts[2]) / 1000)
             if kind == "TOKEN" and len(parts) > 1:
                 fields = parts[1].split(":")
                 if len(fields) > 2 and fields[2].isdigit():
                     self.my_team_id = int(fields[2])
+            elif kind in ("SELECTING", "SELECTED") and len(parts) >= 2 and self._unconfirmed(int(parts[1])):
+                # After a restart, a team we haven't mapped yet would be mapped to
+                # whatever pick we think is next; wait for the page's pick count.
+                self.blocked = "waiting for the draft page to confirm the pick count"
+                self.buffer.append(data)
             elif kind == "SELECTING" and len(parts) >= 2:
-                if not self._map(int(parts[1]), len(self.picks)):
+                team_id = int(parts[1])
+                # A known team on the clock "at the wrong pick" is usually just a
+                # late or repeated message; only the picks themselves decide sync.
+                if team_id not in self.team_slot and not self._map(team_id, len(self.picks)):
                     self._out_of_sync(f"team {parts[1]} on the clock at pick {len(self.picks) + 1}")
             elif kind == "AUTODRAFT" and len(parts) >= 3:
                 team_id, on = int(parts[1]), parts[2].lower() == "true"
@@ -217,6 +269,9 @@ class RoomTracker:
                 self.suggestion = parts[1]
         except ValueError:
             pass  # not the format we know; ignore rather than crash mid-draft
+
+    def _unconfirmed(self, team_id: int) -> bool:
+        return self.resumed and self.page_done is None and team_id not in self.team_slot
 
     def _selected(self, team_id: int, pid: str, by_person: bool) -> None:
         if pid in self.picks:
@@ -237,6 +292,8 @@ class RoomTracker:
             self.log(f"   (player {pid} isn't in your players list; recorded as unknown)")
         self.entries.append(("pick", pid))
         self._save()
+        if len(self.picks) == 1:
+            self._save_map()
         tag = "" if by_person else "  [auto]"
         mine = "  <- YOU" if slot == self.league.my_slot else ""
         self.log(f"#{pick + 1:>3} {self.name(slot):<24} {self.players[pid].name}{tag}{mine}")
@@ -264,14 +321,21 @@ class RoomTracker:
         if recovered is None:
             self._out_of_sync(f"page is at pick {done + 1}, but only {len(self.picks)} picks are known")
             return
+        was_auto = self.auto_slots()
         self.entries = [("pick", pid) for pid in recovered]
-        self.team_slot.clear()
+        # Keep who is on autodraft (ESPN only says so again when it changes).
+        start = set(self.league.start_auto)
+        self.entries += [("auto", slot, slot in was_auto) for slot in sorted(was_auto ^ start)]
         self.blocked = None
         self.log(f"Resynced from the page: {len(recovered)} picks.")
         self._save()
+        # Held messages about picks the page already gave us are stale: replay
+        # only what came after the last of them.
         pending, self.buffer = self.buffer, []
-        for data in pending:
-            self.handle_message(data)
+        got = set(recovered)
+        last = max((i for i, m in enumerate(pending)
+                    if m.startswith("SELECTED") and len(m.split()) > 2 and m.split()[2] in got), default=-1)
+        self._replay(pending[last + 1:])
 
     def _recover(self, text: str, done: int) -> list[str] | None:
         """Picks 1..done from the page's pick list, or None if it isn't all there."""
@@ -279,11 +343,13 @@ class RoomTracker:
         for pid, p in self.players.items():
             index.setdefault(_norm(p.name), pid)
         by_pick: dict[int, str] = {}
+        known = self.picks
         for name, rnd, pos, _team in PICK_LINE.findall(text):
+            k = (int(rnd) - 1) * self.league.num_teams + int(pos)
             pid = index.get(_norm(name))
-            if pid is None:
-                return None
-            by_pick[(int(rnd) - 1) * self.league.num_teams + int(pos)] = pid
+            if pid is None:  # not in your players list: keep what we had, else a placeholder
+                pid = known[k - 1] if k - 1 < len(known) else self._unlisted(name)
+            by_pick[k] = pid
         if not all(k in by_pick for k in range(1, done + 1)):
             return None
         return [by_pick[k] for k in range(1, done + 1)]

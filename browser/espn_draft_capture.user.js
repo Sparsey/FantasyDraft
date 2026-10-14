@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FantasyDraft — ESPN draft room capture
 // @namespace    fantasydraft
-// @version      0.4
+// @version      0.5
 // @description  Forwards ESPN draft-room traffic and page text to the local FantasyDraft capture server.
 // @match        https://*.espn.com/*
 // @run-at       document-start
@@ -40,21 +40,36 @@
     badge.textContent = 'FantasyDraft capture: ' + text;
   }
 
+  var inFlight = false;
+  // What to keep for a retry: every live-feed message (the picks), the latest
+  // page snapshot; bulky API responses are dropped.
+  function forRetry(events) {
+    var lastText = -1;
+    events.forEach(function (e, i) { if (e.kind === 'dom-text') lastText = i; });
+    return events.filter(function (e, i) {
+      return e.kind === 'dom-text' ? i === lastText : (e.kind !== 'fetch' && e.kind !== 'xhr');
+    });
+  }
+
   function flush() {
+    if (inFlight) return;  // one request at a time keeps messages in order
     if (!queue.length) {
       if (!sent) status('running, nothing sent yet', true);
       return;
     }
     var batch = queue;
     queue = [];
+    inFlight = true;
     function fail(why) {
-      queue = batch.concat(queue).slice(-5000);  // keep and retry
-      status(why + ' — is "python -m fantasydraft capture" running?', false);
+      inFlight = false;
+      queue = forRetry(batch.concat(queue));  // keep and retry
+      status(why + ' — is the dashboard (python -m fantasydraft ui) running?', false);
     }
     GM_xmlhttpRequest({
       method: 'POST', url: SERVER, data: JSON.stringify(batch),
       headers: {'Content-Type': 'application/json'},
       onload: function (r) {
+        inFlight = false;
         if (r.status >= 200 && r.status < 300) {
           sent += batch.length;
           status('sent ' + sent + ' events (' + wsCount + ' live-feed messages)', true);
@@ -64,7 +79,7 @@
       },
       onerror: function () { fail('cannot reach 127.0.0.1:8765'); },
       ontimeout: function () { fail('timed out'); },
-      timeout: 5000
+      timeout: 20000
     });
   }
   setInterval(flush, 1000);
