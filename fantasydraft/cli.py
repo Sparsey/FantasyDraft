@@ -558,6 +558,29 @@ def cmd_capture_ranks(args) -> None:
             print(f"  room #{ranks[p.id].get(kinds[0])}  sheet espn_rank {p.espn_rank:g}  proj {p.proj_points:.0f}  {p.name}")
 
 
+def cmd_history(args) -> None:
+    """How each league member drafted in a past season; optionally save as manager profiles."""
+    from .history import fetch_history, merge_managers
+
+    rows = fetch_history(args.league_id, args.season, args.espn_s2, args.swid, args.me or "")
+    table = []
+    for h in rows:
+        fit = f"{h.best} {h.best_p:.0%}" if h.best else "-"
+        table.append([h.owner or "?", h.team, h.picks, h.auto_picks or "", fit,
+                      f"{h.noise:.2f}" if h.noise is not None else "-", f"{h.top_rank_rate:.0%}",
+                      f"{h.reach_vs_adp:+.1f}", f"{h.favorite_team} x{h.favorite_count}" if h.favorite_team else ""])
+    print(f"Draft {args.season} — league {args.league_id}")
+    print(_table(table, ["owner", "team", "own picks", "auto picks", "best fit", "noise",
+                         "took top ESPN rank", "ADP - pick", "favourite NBA team"]))
+    print("\nnoise: 0.05 = very predictable, 0.3 = loose. 'ADP - pick' > 0 = reaches early.")
+    if args.write:
+        out = Path(args.write)
+        cfg = json.loads(out.read_text(encoding="utf-8"))
+        cfg["managers"] = merge_managers(cfg.get("managers", {}), rows)
+        out.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+        print(f"\nSaved profiles to {out} \"managers\" (anything you'd already set was kept).")
+
+
 def cmd_benchmark(args) -> None:
     from .benchmark import benchmark, summarize
     from .io import load_players
@@ -711,6 +734,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--league", help="league file, to compare with your players list")
     p.add_argument("--players", help="players CSV or sheet link, to compare")
     p.set_defaults(func=cmd_capture_ranks)
+
+    p = sub.add_parser("history", help="how each league member drafted in a past season")
+    espn(p)
+    p.add_argument("--me", help="your name as on ESPN (so you're left out of the fitting)")
+    p.add_argument("--write", metavar="LEAGUE_FILE", help="merge the results into this league file's managers")
+    p.set_defaults(func=cmd_history)
 
     p = sub.add_parser("benchmark", help="simulated drafts: how much each pick policy gains over autodraft")
     p.add_argument("--players", help="players CSV or sheet link (default: sample data)")

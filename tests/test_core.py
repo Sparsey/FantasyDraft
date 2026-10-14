@@ -669,3 +669,39 @@ def test_consensus_view_drafter_is_recognised():
     guess = League([TeamProfile(t.name, "unknown", 0.2) for t in true], 9)
     fit = fit_teams(DraftState(guess, players, st.picks))[0]
     assert max(fit.fit, key=fit.fit.get) in ("points@consensus", "balanced@consensus")
+
+
+def test_history_from_past_draft():
+    from fantasydraft.history import analyze_draft, merge_managers
+
+    base = sorted(load_players(SAMPLE).values(), key=lambda p: p.espn_rank)[:80]
+    teams_nba = ["LAL", "BOS", "DEN", "MIA"]
+    raw_players = [{"id": int(p.id), "player": {
+        "id": int(p.id), "fullName": p.name, "eligibleSlots": [0], "proTeamId": 13 if p.name == "Player 012" else 2 + i % 3,
+        "draftRanksByRankType": {"STANDARD": {"rank": p.espn_rank}}, "ownership": {"averageDraftPosition": p.adp},
+        "stats": [{"seasonId": 2026, "statSourceId": 1, "statSplitTypeId": 0, "appliedTotal": p.proj_points}]}}
+        for i, p in enumerate(base)]
+    # 4 teams; team 10 autodrafts (takes top ESPN rank), team 20 takes the 2nd-best rank each time.
+    order = [10, 20, 30, 40]
+    lg = League([TeamProfile(str(t)) for t in order], 0, roster_slots={"PG": 1, "UTIL": 4})
+    avail = list(base)
+    picks = []
+    for k in range(lg.total_picks):
+        tid = order[lg.team_for_pick(k)]
+        avail.sort(key=lambda p: p.espn_rank)
+        p = avail.pop(1 if tid == 20 and len(avail) > 1 else 0)
+        picks.append({"overallPickNumber": k + 1, "teamId": tid, "playerId": int(p.id), "autoDraftTypeId": 1 if tid == 10 else 0})
+    data = {
+        "settings": {"draftSettings": {"pickOrder": order},
+                     "rosterSettings": {"lineupSlotCounts": {"0": 1, "11": 4}}},
+        "teams": [{"id": t, "name": f"Team {t}", "abbrev": f"T{t}", "owners": [f"m{t}"]} for t in order],
+        "members": [{"id": f"m{t}", "firstName": f"Person{t}", "lastName": "X"} for t in order],
+        "draftDetail": {"picks": picks},
+    }
+    rows = analyze_draft(data, raw_players, 2026, me="Person40")
+    by = {h.owner: h for h in rows}
+    assert by["Person10 X"].auto_picks == 5 and by["Person10 X"].profile()["strategy"] == "auto"
+    assert by["Person20 X"].picks == 5 and by["Person20 X"].top_rank_rate == 0.0
+    merged = merge_managers({"Person20 X": {"strategy": "feel"}}, rows)
+    assert merged["Person20 X"]["strategy"] == "feel"  # hand-set value kept
+    assert "T20" in merged["Person20 X"]["match"]

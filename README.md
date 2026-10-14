@@ -48,6 +48,7 @@ python -m fantasydraft watch --league examples/league.json
    | `position_bias` | opponents (not on autodraft) are less likely to take a player at a position they've already filled to the targets: that player's draft slot is pushed back by this fraction (default `0.35`; `0` turns it off) |
    | `sources` | extra projection sources `{name: link}` or `{name: {"url": ..., "weight": 0.5, "games": "projected"}}`, averaged with ESPN into your value (see [sheets/README.md](sheets/README.md#extra-projection-sources)) |
    | `scoring` | fantasy points per stat, e.g. `{"PTS": 1, "REB": 1, "AST": 2, "STL": 4, "BLK": 4, "TO": -2, ...}`; default ESPN standard points; `fetch-league` fills it |
+   | `managers` | per-person profiles, attached to teams by owner or team name: `{"Person": {"match": ["Team name"], "strategy": "balanced", "noise": 0.08, "view": "consensus", "favorite_team": "BOS"}}`. `view` = whose projections they trust (`espn`, `consensus`, `mix`). `history --write` fills these from a past draft |
    | `balance_penalty` | how much a player beyond the targets is discounted (default `0.2` = worth 80%; `0` turns balancing off) |
 
 3. **Draft day**: the most reliable option is following the draft room
@@ -71,6 +72,7 @@ python -m fantasydraft watch --league examples/league.json
 | `draft` | interactive tracker: type picks and `auto`/`back` switches, recommendations after each |
 | `room` | follow the ESPN draft room live via a browser userscript and write `picks.txt` automatically ([browser/README.md](browser/README.md)) |
 | `sources` | check extra projection sources; who ESPN under/overrates |
+| `history` | how each league member drafted in a past season (`--write league.json` saves profiles) |
 | `capture` | record raw draft-room traffic (troubleshooting) |
 | `new-league` | create a league file (e.g. `mock.json` for an ESPN mock) |
 | `recommend` | rank options for my next pick (one-shot) |
