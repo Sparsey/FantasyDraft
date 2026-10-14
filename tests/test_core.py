@@ -1158,7 +1158,7 @@ def test_model_check_runs_on_a_draft():
     players, picks = _simulated_draft(true, 30)
     lg = League([TeamProfile(t.name, "unknown", 0.2) for t in true], 9)
     text = check(DraftState(lg, players, picks), [("pick", p) for p in picks], sims=20)
-    assert "early" in text and "late" in text and "all" in text
+    assert "people" in text and "top 3" in text and "no learning, ESPN rank" in text
 
 
 def test_espn_counts_double_in_the_consensus(tmp_path):

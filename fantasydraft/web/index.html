@@ -448,7 +448,11 @@ function modelTxt(t) {
 }
 function renderTeams() {
   const st = S.status, A = S.strip.accuracy;
-  $("acc").innerHTML = A ? `<span title="Across ${A.picks} opponent picks: how often the model's most likely player was the one taken">predictions: top guess right <b>${pct(A.top_hit)}</b></span>` : "";
+  const part = (x, label) => x ? `${label} ${pct(x.top_hit)} / ${pct(x.top3_hit)} (${x.picks})` : "";
+  $("acc").innerHTML = A ? `<span title="Across ${A.picks} opponent picks: how often the pick was the model's top guess / among its top 3.\n` +
+    `${[part(A.people, "By people:"), part(A.auto, "On autodraft:")].filter(Boolean).join("\n")}">` +
+    `predictions: top guess <b>${pct(A.top_hit)}</b> · top 3 <b>${pct(A.top3_hit)}</b>` +
+    `${A.people && A.auto ? ` <span class="muted">(people ${pct(A.people.top_hit)} / ${pct(A.people.top3_hit)})</span>` : ""}</span>` : "";
   $("teams").innerHTML = `<table class="teams"><thead><tr><th>Team</th>
       <th class="num" title="Rolling draft score by your combined projections: points of everyone they've taken minus what those pick numbers are normally worth. + = value fell to them; − = reaches">Score</th>
       <th class="num" title="The same score by ESPN's projections (what the room sees). Going off ESPN's board for your own list shows up here as a small minus">ESPN</th>

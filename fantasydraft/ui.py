@@ -613,15 +613,20 @@ class Dashboard:
                              if slot == lg.my_slot and row["pick"] == st.my_next_picks()[0] else None,
             })
         # How well the model has predicted opponents' picks so far.
-        scored = [(self.pred_history[i], pid) for i, pid in enumerate(st.picks)
+        scored = [(self.pred_history[i], pid, i in st.auto_picks) for i, pid in enumerate(st.picks)
                   if i in self.pred_history and lg.team_for_pick(i) != lg.my_slot]
+
+        def rates(rows):
+            if not rows:
+                return None
+            return {"picks": len(rows),
+                    "top_hit": sum(bool(pr) and next(iter(pr)) == pid for pr, pid, _ in rows) / len(rows),
+                    "top3_hit": sum(pid in list(pr)[:3] for pr, pid, _ in rows) / len(rows),
+                    "avg_p": sum(pr.get(pid, 0.0) for pr, pid, _ in rows) / len(rows)}
         accuracy = None
         if scored:
-            accuracy = {
-                "picks": len(scored),
-                "top_hit": sum(next(iter(pr)) == pid for pr, pid in scored if pr) / len(scored),
-                "avg_p": sum(pr.get(pid, 0.0) for pr, pid in scored) / len(scored),
-            }
+            accuracy = {**rates(scored), "people": rates([r for r in scored if not r[2]]),
+                        "auto": rates([r for r in scored if r[2]])}
         return {"past": past, "upcoming": upcoming, "accuracy": accuracy}
 
     def _compute_tendencies(self, st: DraftState) -> list[dict | None]:

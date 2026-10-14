@@ -45,49 +45,64 @@ def _state_before(league: League, players: dict, entries: list[tuple], k: int) -
     return st
 
 
-def check(state: DraftState, entries: list[tuple], sims: int = 150) -> str:
-    lg = state.league
-    flat = League([replace(t, strategy="adp", noise=0.2, view="espn", favorites={}, favorite_team="",
+def _flat(lg: League, strategy: str) -> League:
+    """Every team as `strategy` with default randomness, no learning."""
+    return League([replace(t, strategy=strategy, noise=0.2, view="espn", favorites={}, favorite_team="",
                            team_boost=0.0) for t in lg.teams],
                   lg.my_slot, roster_slots=dict(lg.roster_slots), bench_weight=lg.bench_weight,
                   position_targets=lg.position_targets, balance_penalty=lg.balance_penalty,
                   learn_noise=False, position_bias=lg.position_bias, start_auto=lg.start_auto)
-    picks, players = state.picks, state.players
-    thirds = [{"n": 0, "model": [0, 0.0], "flat": [0, 0.0], "espn": [0, 0.0]} for _ in range(3)]
-    total = len(picks)
-    for k, pid in enumerate(picks):
-        team = lg.team_for_pick(k)
-        if team == lg.my_slot or k in state.auto_picks or is_placeholder(players[pid]):
-            continue
-        part = thirds[min(3 * k // max(total, 1), 2)]
-        part["n"] += 1
-        for name, league in (("model", lg), ("flat", flat)):
-            odds = _next_pick_odds(_state_before(league, players, entries, k), sims, seed=k)
-            top = max(odds, key=odds.get) if odds else None
-            part[name][0] += top == pid
-            part[name][1] += odds.get(pid, 0.0)
-        taken = set(picks[:k])
-        board = min((p for p in players.values() if p.id not in taken and not is_placeholder(p)),
-                    key=lambda p: base_key("auto", p))
-        part["espn"][0] += board.id == pid
-        part["espn"][1] += 1.0 if board.id == pid else 0.0
 
-    rows = [("early", thirds[0]), ("middle", thirds[1]), ("late", thirds[2])]
-    out = ["Opponent picks made by people (autodraft picks left out); higher is better.", "",
-           f"{'':8}{'picks':>6}  {'model':>19}  {'no learning':>17}  {'ESPN board':>11}",
-           f"{'':8}{'':>6}  {'top guess / chance':>19}  {'top guess / chance':>17}  {'top guess':>11}"]
-    tot = {"n": 0, "model": [0, 0.0], "flat": [0, 0.0], "espn": [0, 0.0]}
-    for label, part in rows + [("all", None)]:
-        if part is None:
-            part = tot
-        else:
-            for key in ("model", "flat", "espn"):
-                tot[key][0] += part[key][0]
-                tot[key][1] += part[key][1]
-            tot["n"] += part["n"]
-        n = max(part["n"], 1)
-        out.append(f"{label:8}{part['n']:>6}  {part['model'][0] / n:>9.0%} / {part['model'][1] / n:>7.0%}"
-                   f"  {part['flat'][0] / n:>7.0%} / {part['flat'][1] / n:>7.0%}  {part['espn'][0] / n:>11.0%}")
-    out += ["", "Top guess: how often the most likely player was the one taken. Avg chance: the chance "
-                "given to the player actually taken (a fairer test when nobody is very predictable)."]
+
+def check(state: DraftState, entries: list[tuple], sims: int = 150) -> str:
+    lg = state.league
+    picks, players = state.picks, state.players
+    models = {"model (learning)": lg, "no learning, ADP": _flat(lg, "adp"), "no learning, ESPN rank": _flat(lg, "rank")}
+    names = list(models) + ["ESPN board order"]
+    # who -> group -> [picks, top-1 hits, top-3 hits, chance given to the actual pick]
+    score = {g: {n: [0, 0, 0, 0.0] for n in names} for g in ("people", "people, round 5 on", "autodraft")}
+    n_teams = lg.num_teams
+    for k, pid in enumerate(picks):
+        if lg.team_for_pick(k) == lg.my_slot or is_placeholder(players[pid]):
+            continue
+        groups = ["autodraft"] if k in state.auto_picks else \
+            ["people"] + (["people, round 5 on"] if k >= 4 * n_teams else [])
+        taken = set(picks[:k])
+        board = sorted((p for p in players.values() if p.id not in taken and not is_placeholder(p)),
+                       key=lambda p: base_key("auto", p))[:3]
+        board_ids = [p.id for p in board]
+        ranked = {"ESPN board order": {pid_: 1.0 if j == 0 else 0.0 for j, pid_ in enumerate(board_ids)}}
+        for name, league in models.items():
+            if "autodraft" in groups and name != "model (learning)":
+                continue
+            odds = _next_pick_odds(_state_before(league, players, entries, k), sims, seed=k)
+            ranked[name] = dict(sorted(odds.items(), key=lambda kv: -kv[1]))
+        for name, odds in ranked.items():
+            order = board_ids if name == "ESPN board order" else list(odds)
+            for g in groups:
+                row = score[g][name]
+                row[0] += 1
+                row[1] += bool(order) and order[0] == pid
+                row[2] += pid in order[:3]
+                row[3] += odds.get(pid, 0.0) if name != "ESPN board order" else float(bool(order) and order[0] == pid)
+
+    out = ["How well each predictor called the next pick (higher is better).",
+           "top guess: the pick was its most likely player; top 3: among its 3 most likely;",
+           "chance: the chance it gave the player actually taken.", ""]
+    for g, rows in score.items():
+        n = max(rows["model (learning)"][0], rows["ESPN board order"][0])
+        if not n:
+            continue
+        out.append(f"{g} ({n} picks)")
+        out.append(f"  {'':24}{'top guess':>10}{'top 3':>8}{'chance':>8}")
+        for name in names:
+            r = rows[name]
+            if not r[0]:
+                continue
+            chance = f"{r[3] / r[0]:>8.0%}" if name != "ESPN board order" else f"{'':>8}"
+            out.append(f"  {name:24}{r[1] / r[0]:>10.0%}{r[2] / r[0]:>8.0%}{chance}")
+        out.append("")
+    out.append("If 'no learning, ESPN rank' beats 'no learning, ADP' for people, unknown drafters should "
+               "start as rank-followers. If autodraft picks miss ESPN's board order, ESPN's autodraft "
+               "isn't following the rank list in your sheet.")
     return "\n".join(out)
