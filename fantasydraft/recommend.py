@@ -10,6 +10,9 @@ from .models import POSITIONS, DraftState, Player
 from .simulate import Simulator, availability
 
 
+MIN_AVAIL = 0.05  # below this chance of lasting to my pick, a player isn't shown as an option
+
+
 @dataclass
 class Recommendation:
     player: Player
@@ -68,8 +71,8 @@ def recommend(
     # Availability is cheap next to candidate evaluation; use enough runs that
     # "<1%" means something.
     avail = availability(state, sims=max(sims * 3, 200), seed=seed + 1)
-    # Players who never last to my next pick aren't real options.
-    gone = set() if on_clock else {pid for pid, pr in avail.items() if pr and pr[0] == 0}
+    # Players who almost never last to my next pick aren't real options.
+    gone = set() if on_clock else {pid for pid, pr in avail.items() if pr and pr[0] < MIN_AVAIL}
     sim = Simulator(state)
     out: list[Recommendation] = []
     for p in candidate_pool(state, candidates, exclude=gone):

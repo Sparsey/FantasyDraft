@@ -44,13 +44,20 @@ the same file resumes.
 - **Top bar:** pick number, who's on the clock with the countdown, how many
   picks until yours, and feed status. The search box records a pick by hand
   (ESPN rank or name, then Enter) if the feed isn't running.
-- **Recommendations / Best available:** what `watch` shows, recomputed in
-  the background after every pick. `+` records a player as the next pick.
-- **Your lineup:** players by slot, plus position targets (`C 3/3`).
-- **Teams:** each team's modelled strategy (change it from the dropdown,
-  which saves to the league file) and the autodraft switch. Below that is
-  what their own picks suggest so far ("looks like rank"); `use` adopts it.
-- **Recent picks** (autodraft picks tagged) and a **log**.
+- **Pick strip:** each pick up to yours, with who that team will likely take.
+- **Recommendations:** SAFE (ESPN's top projection you can realistically get)
+  and how every other option compares on final roster value ("vs SAFE"; hover
+  for the better/worse odds), plus your position counts (`C 3/3`). Players
+  with under 5% chance of lasting to your pick are left out. **Sleepers**
+  lists players your sources rate well above ESPN, for later rounds. `+`
+  (only without a live feed) records a player as the next pick.
+- **Teams:** rolling score (value gained vs. pick slot), starting-lineup
+  rank, the model used for each team (dropdown, saved to the league file;
+  hover a team for its details) and the autodraft switch.
+- **Troubleshooting log**, collapsed.
+
+ESPN's own room already shows recent picks, your roster and every team's
+roster, so the dashboard doesn't repeat them.
 
 The terminal pair `room` + `watch` still works if you prefer it.
 

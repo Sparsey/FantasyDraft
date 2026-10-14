@@ -7,7 +7,7 @@
 | Player data | ✅ Google Sheet with an on-demand *Update players from ESPN* menu: ESPN projections (your league's scoring once activated), the draft room's own rankings (STANDARD/ROTO), ADP |
 | Extra projection sources | ✅ FantasyPros, Hashtag (free top 30), last season (Basketball-Reference, half weight, per game × projected games); consensus = your value, ESPN = the room's view |
 | Live draft feed | ✅ Tampermonkey userscript → `ui`/`room`: picks, autodraft on/off (incl. timeouts), team mapping, resync after rejoining |
-| Dashboard (`ui`) | ✅ Half-screen window: pick strip with likely picks, recommendations with "take X over Y" callout, vs-ESPN + source agreement, ESPN-underrates tab, lineup with position targets, teams with strategies, autodraft switches |
+| Dashboard (`ui`) | ✅ Half-screen window built to sit next to ESPN's room: pick strip up to your pick, SAFE/GAMBLE recommendations, sleepers tab, position counts, teams table (score, lineup rank, model, autodraft) |
 | Opponent models | ✅ adp / rank / points / balanced / feel / auto / unknown; whose numbers they trust (ESPN / consensus / mix); favourite NBA team; position needs; noise and strategy learned from their picks |
 | People | ✅ `managers` profiles matched to teams by owner/team name; `history` fits each person from a past draft |
 | Evaluation | ✅ `benchmark` (auto vs points vs model on simulated drafts), `sources` report |
