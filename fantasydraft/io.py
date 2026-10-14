@@ -350,6 +350,7 @@ def apply_league_sources(players: dict[str, Player], league_path: str | Path) ->
     reports = apply_sources(players, sources, scoring)
     for r in reports:
         print(f"source {r.name}: {r.matched}/{r.rows} players matched"
+              + (f", shooting estimated for {r.estimated}" if r.estimated else "")
               + (f" (rescaled x{1 / r.scale:.2f}: missing {', '.join(r.missing_stats)})" if r.calibrated else ""),
               file=sys.stderr)
     return reports

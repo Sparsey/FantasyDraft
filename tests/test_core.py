@@ -572,3 +572,30 @@ def test_source_weights_and_projected_games(tmp_path):
     assert vals["last"] == pytest.approx(30 * 70)  # per game x projected 70 games, not x 10
     # weighted: (2100*1 + 2100*1 + 2100*0.5) / 2.5
     assert players["s"].proj_points == pytest.approx(2100)
+
+
+def test_estimate_shooting_from_percentages():
+    from fantasydraft.sources import estimate_shooting
+
+    # Jokic per game: 28.4 pts, 1.8 3PM, .573 FG, .816 FT; real 10.5/18.3 FG, 5.6/6.8 FT
+    est = estimate_shooting({"PTS": 28.4, "3PM": 1.8}, {"FG%": 0.573, "FT%": 0.816}, ft_rate=6.8 / 18.3)
+    assert est["FGA"] == pytest.approx(18.3, abs=0.2) and est["FGM"] == pytest.approx(10.5, abs=0.15)
+    assert est["FTA"] == pytest.approx(6.8, abs=0.1) and est["FTM"] == pytest.approx(5.6, abs=0.1)
+    assert 2 * est["FGM"] + 1.8 + est["FTM"] == pytest.approx(28.4)
+
+
+def test_percentage_only_source_no_longer_rescaled(tmp_path):
+    from fantasydraft.sources import apply_sources
+
+    f = tmp_path / "fp.csv"
+    f.write_text("Player,PTS,REB,AST,BLK,STL,FG%,FT%,3:00 PM,GP,MIN,TO\n"
+                 "Big Man,15,10,2,1.5,0.5,0.62,0.70,0.0,70,28,1.5\n"
+                 "Volume Guard,15,3,5,0.2,1.0,0.41,0.85,2.5,70,32,2.5\n")
+    players = {"b": Player("b", "Big Man", frozenset({"C"}), 2000.0, 1, espn_points=2000.0),
+               "g": Player("g", "Volume Guard", frozenset({"PG"}), 2000.0, 2, espn_points=2000.0)}
+    reports = apply_sources(players, {"fp": str(f)})
+    assert reports[0].estimated == 2 and not reports[0].calibrated and not reports[0].missing_stats
+    vals_b, vals_g = dict(players["b"].sources)["fp"], dict(players["g"].sources)["fp"]
+    # Same points, but the efficient big gains from the FGM/FGA scoring and the volume guard loses.
+    big_shooting = 2 * 0.62 - 1  # per FGA
+    assert big_shooting > 0 and vals_b > vals_g

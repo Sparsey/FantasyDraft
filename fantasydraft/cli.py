@@ -499,6 +499,9 @@ def cmd_sources(args) -> None:
               f" | median vs ESPN: {r.scale:.2f}x" + (" (rescaled to ESPN)" if r.calibrated else "")
               + (f" | weight {r.weight:g}" if r.weight != 1 else "")
               + (" | per game x projected games" if r.games == "projected" else ""))
+        if r.estimated:
+            print(f"  shooting attempts estimated from FG%/FT% for {r.estimated} players"
+                  " (using each player's free-throw rate from sources that have attempts)")
         if r.missing_stats:
             print(f"  missing scoring stats: {', '.join(r.missing_stats)}")
         if r.unmatched:

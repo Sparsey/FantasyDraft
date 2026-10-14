@@ -26,7 +26,7 @@ import io as _io
 import math
 import re
 from html.parser import HTMLParser
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from statistics import mean, pstdev
 
 from .io import _norm, _read_text
@@ -100,6 +100,7 @@ class SourceLine:
     stats: dict[str, float]  # season totals (or per game x GP)
     per_game: bool
     game_stats: dict[str, float] | None = None  # per-game stats, when GP is known or the source is per game
+    pct: dict[str, float] = field(default_factory=dict)  # FG% / FT% as fractions, when given
 
 
 class _Tables(HTMLParser):
@@ -201,13 +202,37 @@ def read_source(src: str) -> list[SourceLine]:
     per_game = max(s["PTS"] for _, s, _ in raw) < 60
     out = []
     for name, stats, gp in raw:
+        pct = {k: (stats[k] / 100 if stats[k] > 1 else stats[k]) for k in ("FG%", "FT%") if stats.get(k)}
         stats = {k: v for k, v in stats.items() if k not in ("FG%", "FT%")}
         if per_game:
             game_stats = stats
             stats = {k: v * (gp if gp else DEFAULT_GAMES) for k, v in stats.items()}
         else:
             game_stats = {k: v / gp for k, v in stats.items()} if gp else None
-        out.append(SourceLine(name, gp, stats, per_game, game_stats))
+        out.append(SourceLine(name, gp, stats, per_game, game_stats, pct))
+    return out
+
+
+DEFAULT_FT_RATE = 0.25  # free-throw attempts per field-goal attempt, a typical NBA rate
+
+
+def estimate_shooting(stats: dict[str, float], pct: dict[str, float], ft_rate: float) -> dict[str, float]:
+    """Fill in missing makes/attempts from points, threes and FG%/FT%.
+
+    With f = FG%, t = FT%, r = FTA/FGA:  PTS = 2*FGM + 3PM + FTM
+    = 2f*FGA + 3PM + t*r*FGA, so FGA = (PTS - 3PM) / (2f + t*r).
+    """
+    if all(k in stats for k in ("FGM", "FGA", "FTM", "FTA")) or not ("FG%" in pct and "FT%" in pct):
+        return stats
+    f, t = pct["FG%"], pct["FT%"]
+    if not 0 < f <= 1 or not 0 <= t <= 1 or "PTS" not in stats:
+        return stats
+    fga = max(stats["PTS"] - stats.get("3PM", 0.0), 0.0) / (2 * f + t * ft_rate)
+    out = dict(stats)
+    out.setdefault("FGA", fga)
+    out.setdefault("FGM", f * fga)
+    out.setdefault("FTA", ft_rate * fga)
+    out.setdefault("FTM", t * ft_rate * fga)
     return out
 
 
@@ -228,6 +253,7 @@ class SourceReport:
     calibrated: bool
     weight: float = 1.0
     games: str = "source"
+    estimated: int = 0  # players whose shooting attempts were estimated from FG%/FT%
 
 
 def source_config(value) -> dict:
@@ -278,12 +304,22 @@ def apply_sources(players: dict[str, Player], sources: dict[str, object],
                 if line.gp:
                     games.setdefault(pid, []).append(line.gp)
 
+    # Each player's free-throw rate, from any source with real attempts.
+    rates: dict[str, list[float]] = {}
+    for sname in configs:
+        for pid, line in loaded[sname]:
+            if line.stats.get("FGA", 0) > 0 and "FTA" in line.stats:
+                rates.setdefault(pid, []).append(line.stats["FTA"] / line.stats["FGA"])
+    all_rates = sorted(r for rs in rates.values() for r in rs)
+    league_rate = all_rates[len(all_rates) // 2] if all_rates else DEFAULT_FT_RATE
+
     per_player: dict[str, list[tuple[str, float, float]]] = {
         pid: [("ESPN", p.room_points, 1.0)] for pid, p in players.items()}
     reports = []
     for sname, cfg in configs.items():
         found: dict[str, float] = {}
         missing: set[str] = set()
+        estimated = 0
         for pid, line in loaded[sname]:
             if cfg["games"] == "projected":
                 if not line.game_stats:
@@ -292,6 +328,11 @@ def apply_sources(players: dict[str, Player], sources: dict[str, object],
                 stats = {k: v * gp for k, v in line.game_stats.items()}
             else:
                 stats = line.stats
+            if line.pct:
+                rate = mean(rates[pid]) if pid in rates else league_rate
+                before = len(stats)
+                stats = estimate_shooting(stats, line.pct, rate)
+                estimated += len(stats) > before
             pts, miss = fantasy_points(stats, scoring)
             missing.update(miss)
             found[pid] = pts
@@ -302,7 +343,7 @@ def apply_sources(players: dict[str, Player], sources: dict[str, object],
             per_player[pid].append((sname, pts / scale if calibrate else pts, float(cfg["weight"])))
         reports.append(SourceReport(sname, len(loaded[sname]) + len(unmatched[sname]), len(found),
                                     unmatched[sname], sorted(missing), scale, calibrate,
-                                    float(cfg["weight"]), cfg["games"]))
+                                    float(cfg["weight"]), cfg["games"], estimated))
     for pid, vals in per_player.items():
         p = players[pid]
         total_w = sum(w for _, _, w in vals)
