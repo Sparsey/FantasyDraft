@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FantasyDraft — ESPN draft room capture
 // @namespace    fantasydraft
-// @version      0.3
+// @version      0.4
 // @description  Forwards ESPN draft-room traffic and page text to the local FantasyDraft capture server.
 // @match        https://*.espn.com/*
 // @run-at       document-start
@@ -95,7 +95,7 @@
   page.fetch = function (input) {
     var url = typeof input === 'string' ? input : (input && input.url) || '';
     return nativeFetch.apply(this, arguments).then(function (resp) {
-      if (/fantasy\.espn\.com|lm-api/.test(url)) {
+      if (/espn/.test(url)) {
         resp.clone().text().then(function (body) {
           record('fetch', {url: url, status: resp.status, data: body.slice(0, 2000000)});
         }).catch(function () {});
@@ -103,6 +103,30 @@
       return resp;
     });
   };
+
+  // 2b. Same for XMLHttpRequest, which the draft room may use for player lists and rankings.
+  var XHR = page.XMLHttpRequest;
+  if (XHR) {
+    var nativeOpen = XHR.prototype.open;
+    var nativeXSend = XHR.prototype.send;
+    XHR.prototype.open = function (method, url) {
+      this.__fdUrl = String(url || '');
+      return nativeOpen.apply(this, arguments);
+    };
+    XHR.prototype.send = function () {
+      var xhr = this;
+      if (/espn/.test(xhr.__fdUrl || '')) {
+        xhr.addEventListener('load', function () {
+          try {
+            var body = (xhr.responseType === '' || xhr.responseType === 'text') ? xhr.responseText
+              : (xhr.responseType === 'json' ? JSON.stringify(xhr.response) : '[' + xhr.responseType + ']');
+            record('xhr', {url: xhr.__fdUrl, status: xhr.status, data: String(body).slice(0, 2000000)});
+          } catch (e) {}
+        });
+      }
+      return nativeXSend.apply(this, arguments);
+    };
+  }
 
   // 3. Page text every 10 s (and soon after load), used to resync when you
   //    join a draft that's already under way.

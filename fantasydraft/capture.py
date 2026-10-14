@@ -157,7 +157,27 @@ def summarize(path: str | Path, samples: int = 3) -> str:
                 seen.add(str(key))
                 out.append("  " + redact(str(e.get("data", "")))[:120])
 
-    urls = Counter(re.sub(r"\?.*", "", e.get("url", "")) for e in events if e.get("kind") in ("fetch", "ws-open"))
+    # Web requests whose responses look like they carry draft rankings.
+    rankish = []
+    for e in events:
+        if e.get("kind") in ("fetch", "xhr"):
+            body = str(e.get("data", ""))
+            types = sorted(set(re.findall(r'"(\w+)"\s*:\s*\{[^{}]*"rank"', body)))
+            hits = body.count("draftRanksByRankType") + body.count('"rank"') + body.count('"draftRank')
+            if hits:
+                # Paths are safe to show once the query string (which can hold ids) is dropped.
+                rankish.append((re.sub(r"\?.*", "", e.get("url", "")), len(body), hits, types,
+                                re.findall(r'[?&]view=(\w+)', e.get("url", ""))))
+    if rankish:
+        out.append("\n== responses that mention rankings ==")
+        for url, size, hits, types, views in rankish[:15]:
+            out.append(f"  {url}  views={views or '-'}  {size:,} chars, {hits} rank fields"
+                       + (f", rank lists: {', '.join(types)}" if types else ""))
+    init = [e for e in events if e.get("kind") == "ws-in" and str(e.get("data", "")).startswith("INIT")]
+    if init:
+        out.append(f"\n== INIT message: {len(str(init[0].get('data', ''))):,} chars ==")
+
+    urls = Counter(re.sub(r"\?.*", "", e.get("url", "")) for e in events if e.get("kind") in ("fetch", "xhr", "ws-open"))
     if urls:
         out.append("\n== URLs ==")
         out += [f"  x{n}  {redact(u)}" for u, n in urls.most_common(20)]
