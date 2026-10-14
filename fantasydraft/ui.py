@@ -87,6 +87,7 @@ class Dashboard:
         self.done_version = -1  # last version fully computed
         self._prev_chances: tuple[int | None, dict] = (None, {})  # (my next pick, chances) last time
         self._prev: dict = {}  # chances to compare with in this round of updates
+        self._target: tuple[int | None, str | None] = (None, None)  # (my next pick, target id) last worked out
         self._suggested: dict[int, dict] = {}  # my pick (0-based) -> what was suggested last
         self._logged: set[int] = set()
         picks_file = Path(picks_path)
@@ -209,7 +210,11 @@ class Dashboard:
         if st.is_complete or not st.my_next_picks():
             return {"recs": []}
         shown, espn_top = self._board(st, probs)
+        # Keep the last target highlighted until the new comparison is in.
+        mine = st.my_next_picks()
+        keep = self._target[1] if self._target[0] == mine[0] else None
         rows = [{**self._board_row(st, p, probs),
+                 "is_target": p.id == keep,
                  "tag": "safe" if probs is not None and p is espn_top else None,
                  "is_baseline": probs is not None and p is espn_top} for p in shown]
         return {"recs": rows, "advice": None, "has_sources": self._has_sources(st),
@@ -326,6 +331,8 @@ class Dashboard:
             "tag": "safe" if baseline and r.player.id == baseline.id
                    else "gamble" if gamble and r.player.id == gamble.id else None,
         } for i, r in enumerate(recs)]
+        if recs:
+            self._target = (st.my_next_picks()[0], recs[0].player.id)
         # The rest of the board (not compared in the simulations), all by your projections.
         listed = {r.player.id for r in recs}
         board, _ = self._board(st, probs)
