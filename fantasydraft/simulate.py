@@ -27,12 +27,14 @@ class Simulator:
         self.state = state
         # Opponents' noise (league setting learn_noise) and, for "unknown" teams,
         # strategy, learned from their picks so far.
-        self.learned = {}
+        self.learned = {}  # team -> best single profile
+        self.mixes = {}  # team -> [(probability, profile)] drawn from per simulated draft
         unknown = any(t.strategy == "unknown" for t in state.league.teams)
         if state.picks and (state.league.learn_noise or unknown):
-            from .learn import learned_profiles
+            from .learn import learned_mixes
 
-            self.learned = learned_profiles(state)
+            self.mixes = learned_mixes(state)
+            self.learned = {t: max(opts, key=lambda o: o[0])[1] for t, opts in self.mixes.items()}
         self.league = state.league
         self.slots = self.league.starting_slots
         strategies = ("auto", "adp", "rank", "points", "points@consensus", "points@mix")
@@ -55,12 +57,25 @@ class Simulator:
                 break
         return out
 
-    def profile(self, team: int):
+    def draw_profiles(self, rng: random.Random) -> dict:
+        """For one simulated draft, pick each unsure team's strategy from its mix."""
+        out = {}
+        for team, options in self.mixes.items():
+            if len(options) > 1:
+                r, acc = rng.random(), 0.0
+                for p, profile in options:
+                    acc += p
+                    if r < acc:
+                        break
+                out[team] = profile
+        return out
+
+    def profile(self, team: int, drawn: dict | None = None):
         """The model used for an opponent: auto while on autodraft, else saved
-        strategy with learned noise."""
+        strategy with learned noise (or this draft's draw for unsure teams)."""
         if team in self.state.auto_teams:
             return self.state.profile(team)
-        profile = self.learned.get(team, self.state.profile(team))
+        profile = (drawn or {}).get(team) or self.learned.get(team, self.state.profile(team))
         if profile.strategy == "unknown":  # no picks to learn from yet
             profile = replace(profile, strategy="adp")
         return profile
@@ -123,6 +138,7 @@ class Simulator:
         forced = my_next
         bias = league.position_bias
         targets = league.targets
+        drawn = self.draw_profiles(rng)
         counts: list[dict[str, float]] = [{} for _ in range(league.num_teams)]
         for t, roster in enumerate(self.state.rosters()):
             for p in roster:
@@ -141,7 +157,7 @@ class Simulator:
                 my_roster.append(choice)
                 order[pick] = choice.id
             else:
-                profile = self.profile(team)
+                profile = self.profile(team, drawn)
                 pool, keys = self._pool(profile.order_key, taken, starts)
                 full = full_positions(counts[team], targets) if bias else frozenset()
                 choice = choose_pick(profile, pool, rng, pick, keys, full, bias, counts[team], targets)

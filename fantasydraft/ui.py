@@ -377,6 +377,7 @@ class Dashboard:
                     "best": best, "best_p": round(f.fit[best], 2) if f else None,
                     "noise": f.noise if f else None, "prior_noise": f.prior_noise if f else None,
                     "used": f.strategy if f else None,
+                    "mix": [[s, round(p, 2)] for s, (p, _) in f.mix.items()] if f else None,
                     "suggested": suggested,
                 })
             self._tendencies = (version, rows)

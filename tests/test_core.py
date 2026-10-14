@@ -405,7 +405,8 @@ def test_learning_noise_and_strategy_from_picks():
     guess = League([TeamProfile(t.name, "adp", 0.2) for t in true], 9)
     fits = fit_teams(DraftState(guess, players, picks))
     assert fits[0].noise < 0.08  # always took the top of the ADP list
-    assert fits[1].fit["rank"] > 0.8  # recognised as following ESPN rank
+    assert max(fits[1].fit, key=fits[1].fit.get) == "rank"  # recognised as following ESPN rank
+    assert fits[1].fit["rank"] > 0.5
     assert 9 not in fits  # my own team is never fitted
 
 
@@ -805,3 +806,27 @@ def test_auto_in_league_file_is_the_autodraft_switch(tmp_path):
     assert frank in st.auto_teams and st.profile(frank).strategy == "auto"
     apply_log(st, [("auto", frank, False)])  # switched off in the room
     assert st.profile(frank).strategy == "rank"
+
+
+def test_recent_picks_count_more_and_unsure_teams_are_mixed():
+    import fantasydraft.learn as learn
+
+    rows = [{"adp": (0.9,) * 9, "rank": (0.1,) * 9}] * 6 + [{"adp": (0.1,) * 9, "rank": (0.9,) * 9}] * 6
+    real = learn._pick_evidence
+    learn._pick_evidence = lambda state: {0: rows}
+    try:
+        lg = League([TeamProfile("switcher", "unknown")] + [TeamProfile(f"t{i}", "adp") for i in range(9)], 9)
+        f = learn.fit_teams(DraftState(lg, {}))[0]
+    finally:
+        learn._pick_evidence = real
+    assert f.fit["rank"] > 0.9  # same number of picks each way: the recent ones win
+    assert f.strategy == "rank" and set(f.mix) <= {"rank", "adp"}
+
+
+def test_simulator_draws_unsure_teams_strategy_per_draft():
+    lg = League([TeamProfile("u", "unknown")] + [TeamProfile(f"t{i}", "adp") for i in range(9)], 9)
+    sim = Simulator(DraftState(lg, {}))
+    sim.mixes = {0: [(0.6, TeamProfile("u", "rank")), (0.4, TeamProfile("u", "feel"))]}
+    rng = random.Random(1)
+    draws = [sim.draw_profiles(rng)[0].strategy for _ in range(2000)]
+    assert 0.55 < draws.count("rank") / 2000 < 0.65

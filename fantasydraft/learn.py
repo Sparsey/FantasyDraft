@@ -36,6 +36,12 @@ def _strategies(state: DraftState) -> tuple[str, ...]:
 DRAWS = 150  # simulated choices per (pick, strategy, noise)
 PRIOR_SPREAD = 0.8  # sd of the prior on log(noise): fairly loose
 OUTSIDE = 1e-3  # likelihood of a pick from outside a strategy's top 30
+# Recent picks count more, so a drafter who changes approach is noticed: a
+# pick's weight halves every RECENT_HALF_LIFE own picks.
+RECENT_HALF_LIFE = 6.0
+# Unknown teams are simulated as a mix of the strategies that fit; ones below
+# this share are dropped.
+MIX_FLOOR = 0.05
 
 
 @dataclass
@@ -45,6 +51,9 @@ class TeamFit:
     noise: float  # learned noise for that strategy
     prior_noise: float
     fit: dict[str, float]  # strategy -> posterior probability
+    # What the simulation draws from: strategy -> (probability, noise). One
+    # entry for a saved strategy; the fitting ones, by fit, for "unknown".
+    mix: dict[str, tuple[float, float]] = None
 
 
 # (strategy, pick index, chosen index, pool keys) -> likelihood per grid noise
@@ -141,8 +150,11 @@ def fit_teams(state: DraftState) -> dict[int, TeamFit]:
             continue
         posts: dict[str, list[float]] = {}
         evidence: dict[str, float] = {}
+        n = len(rows)
+        weights = [0.5 ** ((n - 1 - i) / RECENT_HALF_LIFE) for i in range(n)]
         for s in rows[0]:
-            logw = [lp + sum(math.log(r[s][g]) for r in rows) for g, lp in enumerate(log_prior)]
+            logw = [lp + sum(w * math.log(r[s][g]) for w, r in zip(weights, rows))
+                    for g, lp in enumerate(log_prior)]
             top = max(logw)
             w = [math.exp(x - top) for x in logw]
             posts[s] = [x / sum(w) for x in w]
@@ -154,9 +166,36 @@ def fit_teams(state: DraftState) -> dict[int, TeamFit]:
         if key in ("points", "balanced") and profile.view != "espn":
             key = f"{key}@{profile.view}"
         saved = key if key in fit else max(fit, key=fit.get)
-        # Posterior mean in log space (noise is a scale parameter).
-        noise = math.exp(sum(w * math.log(n) for w, n in zip(posts[saved], NOISE_GRID)))
-        out[team] = TeamFit(len(rows), saved, round(noise, 3), prior_noise, fit)
+
+        def noise_for(s: str) -> float:  # posterior mean in log space (noise is a scale)
+            return round(math.exp(sum(w * math.log(x) for w, x in zip(posts[s], NOISE_GRID))), 3)
+        if key in fit:
+            mix = {saved: (1.0, noise_for(saved))}
+        else:
+            kept = {s: p for s, p in fit.items() if p >= MIX_FLOOR}
+            total = sum(kept.values())
+            mix = {s: (p / total, noise_for(s)) for s, p in sorted(kept.items(), key=lambda kv: -kv[1])}
+        out[team] = TeamFit(len(rows), saved, noise_for(saved), prior_noise, fit, mix)
+    return out
+
+
+def learned_mixes(state: DraftState, fits: dict[int, TeamFit] | None = None
+                  ) -> dict[int, list[tuple[float, TeamProfile]]]:
+    """Per team, the profiles a simulation draws from, with their probabilities:
+    the saved strategy with learned noise, or for "unknown" teams every strategy
+    that fits their (recent) picks."""
+    fits = fit_teams(state) if fits is None else fits
+    out = {}
+    for team, f in fits.items():
+        profile = state.league.teams[team]
+        if profile.strategy == "auto":
+            continue
+        options = []
+        for s, (p, noise) in f.mix.items():
+            strategy, _, view = s.partition("@")
+            options.append((p, replace(profile, strategy=strategy, view=view or profile.view,
+                                       noise=noise if state.league.learn_noise else profile.noise)))
+        out[team] = options
     return out
 
 
