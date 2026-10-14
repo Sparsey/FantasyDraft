@@ -129,7 +129,11 @@ class Dashboard:
                 st = self.state()
                 self.computing = True
             try:
-                if not self._publish(version, self._quick(st), "quick"):
+                # Until the new chances are in, show last pick's (same next pick of
+                # yours) so the availability lines don't vanish for a second.
+                mine = st.my_next_picks()
+                old = self._prev_chances[1] if mine and self._prev_chances[0] == mine[0] else None
+                if not self._publish(version, self._quick(st, old), "quick"):
                     continue
                 probs, outlook = None, None
                 if not st.is_complete and st.my_next_picks():
