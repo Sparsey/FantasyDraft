@@ -289,7 +289,7 @@ class Dashboard:
                 "recent": recent[::-1],
                 "strip": self._strip(st),
                 "log": list(tr.recent_log)[-12:],
-                "result": self.result,
+                "result": self._current_result(st),
             }
 
     def _strip(self, st: DraftState) -> dict:
@@ -377,6 +377,23 @@ class Dashboard:
         name = self.tracker.name(slot)
         self.tracker.log(f"   {name}: strategy set to {strategy}")
         return f"{name} now modelled as '{strategy}'"
+
+    def _current_result(self, st: DraftState) -> dict:
+        """The latest recommendations, minus anyone drafted since they were computed
+        (a new pick arrives seconds before the recompute finishes)."""
+        r = self.result
+        if r.get("version") == self.tracker.version:
+            return r
+        taken = set(st.picks)
+        out = dict(r, stale=True)
+        for key in ("recs", "available", "underrated"):
+            if isinstance(r.get(key), list):
+                out[key] = [x for x in r[key] if x.get("id") not in taken]
+        adv = r.get("advice")
+        if adv and any(st.players.get(pid) and st.players[pid].name in (adv.get("top"), adv.get("best"))
+                       for pid in taken):
+            out["advice"] = None  # it was about a player who's now gone
+        return out
 
     def players_list(self) -> list[dict]:
         with self.lock:

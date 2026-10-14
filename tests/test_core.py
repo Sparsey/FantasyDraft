@@ -734,3 +734,20 @@ def test_missed_picks_entered_by_hand_release_held_feed(tmp_path):
     tracker.manual_pick(ids[13])
     assert not tracker.blocked
     assert tracker.picks == ids[:16]  # held picks 15 and 16 replayed in place
+
+
+def test_stale_recommendations_drop_drafted_players(tmp_path):
+    from fantasydraft.ui import Dashboard
+
+    f = tmp_path / "l.json"
+    f.write_text('{"my_team": 4, "players": "%s", "teams": [%s]}' % (
+        str(SAMPLE).replace("\\\\", "/"), ",".join('{"name": "T%d"}' % i for i in range(10))))
+    dash = Dashboard(None, f, tmp_path / "p.txt", None, sims=5, candidates=4)
+    st = dash.state()
+    top = sorted(st.players.values(), key=lambda p: -p.proj_points)[:3]
+    dash.result = {"version": dash.tracker.version, "recs": [{"id": p.id, "name": p.name} for p in top],
+                   "advice": {"top": top[0].name, "best": top[0].name}}
+    dash.tracker.manual_pick(top[0].id)  # a pick lands before the recompute
+    r = dash._current_result(dash.state())
+    assert r["stale"] and [x["id"] for x in r["recs"]] == [p.id for p in top[1:]]
+    assert r["advice"] is None

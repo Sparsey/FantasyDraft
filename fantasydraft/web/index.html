@@ -308,6 +308,7 @@ function render() {
   const r = S.result || {};
   $("undertab").hidden = !r.has_sources;
   $("spin").textContent = S.computing ? "updating…" : r.error || "";
+  $("tablebody").style.opacity = r.stale ? "0.55" : "";
   renderTable(r);
   renderAdvice(r.advice);
   const sg = $("suggest");
