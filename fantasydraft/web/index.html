@@ -156,8 +156,7 @@
   .teams tr.onclock td { background: var(--accent-soft); }
   .teams tr.onclock td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   .teams .nm { font-weight: 600; max-width: 170px; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: bottom; }
-  .teams select { padding: 1px 4px; font-size: 12px; }
-  .teams .model { font-size: 11.5px; color: var(--muted); margin-left: 5px; }
+  .teams .model { font-size: 12px; white-space: nowrap; }
   .acc { font-size: 11.5px; color: var(--muted); }
   .acc b { color: var(--ink); }
   .toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: var(--muted); cursor: pointer; user-select: none; flex: none; }
@@ -219,7 +218,6 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const pct = (x) => x == null ? "–" : x <= 0 ? "0%" : x >= 1 ? "100%" : x < 0.01 ? "<1%" : x > 0.99 ? ">99%" : Math.round(x * 100) + "%";
 const signed = (x) => (x > 0 ? "+" : "") + (typeof x === "number" ? x.toLocaleString() : x);
-const STRATS = {unknown: "Unknown: learn from their picks", adp: "Around ADP", rank: "Follows ESPN rank, loosely", points: "By projected points", balanced: "Balanced builder: best value for their roster, avoids piling up a position", feel: "By feel: picks fairly evenly among ESPN's top ~8"};
 let S = null, players = [], playersVersion = -1, tab = "recs", clockAt = 0, sel = 0, lastRender = "", tableKey = "";
 
 function bar(p) {
@@ -409,7 +407,7 @@ function render() {
 
   // Re-render the slower-changing panels only when their data changed (keeps selects/scroll stable).
   const key = JSON.stringify([S.version, S.teams, S.positions, S.strip.accuracy]);
-  if (key !== lastRender && !document.activeElement?.matches("select")) {
+  if (key !== lastRender) {
     lastRender = key;
     renderChips(); renderTeams();
   }
@@ -471,11 +469,16 @@ function teamTip(t) {
   }
   return lines.join("\n");
 }
-function modelTxt(t) {  // what the simulation actually uses for an "unknown" team
-  if (t.me || t.auto || t.strategy !== "unknown") return "";
+// What the simulation is using for a team right now (read-only).
+function modelTxt(t) {
+  if (t.me) return "";
+  if (t.auto) return `<b>autodraft</b>`;
   const o = t.observed;
-  if (o && o.mix && o.mix.length) return `→ ${o.mix[0][0]} ${Math.round(o.mix[0][1] * 100)}%`;
-  return "→ adp";
+  if (t.strategy !== "unknown") return `<b>${esc(t.strategy)}</b> <span class="muted">(set)</span>`;
+  if (o && o.mix && o.mix.length)
+    return o.mix.slice(0, 2).map(([k, p], i) => i ? `<span class="muted">${esc(k)} ${Math.round(p * 100)}%</span>`
+                                                  : `<b>${esc(k)}</b> ${Math.round(p * 100)}%`).join(" · ");
+  return `<span class="muted">adp (no picks yet)</span>`;
 }
 function renderTeams() {
   const st = S.status, A = S.strip.accuracy;
@@ -484,17 +487,16 @@ function renderTeams() {
       <th class="num" title="Rolling draft score by your combined projections: points of everyone they've taken minus what those pick numbers are normally worth. + = value fell to them; − = reaches">Score</th>
       <th class="num" title="The same score by ESPN's projections (what the room sees). Going off ESPN's board for your own list shows up here as a small minus">ESPN</th>
       <th class="num" title="Projected points of their best starting lineup now (your numbers), ranked among the teams">Starters</th>
-      <th title="How the simulation models this team when they pick for themselves (hover a team for details)">Model</th>
+      <th title="How the simulation predicts this team right now: autodraft, the strategy that best fits their picks so far (with how sure it is), or one set in your league file. Hover a team for details">Model</th>
       <th title="On autodraft now (ESPN picks by its rank, no randomness). Follows the draft room; click to set by hand">Auto</th></tr></thead><tbody>` +
     S.teams.map((t) => {
-      const opts = Object.keys(STRATS).map((k) => `<option value="${k}" ${k === t.strategy ? "selected" : ""} title="${STRATS[k]}">${k}</option>`).join("");
       const cls = [t.me ? "me" : "", st.on_clock && st.on_clock.slot === t.slot ? "onclock" : ""].join(" ");
       return `<tr class="${cls}" title="${esc(teamTip(t))}">
         <td><span class="muted">${t.slot + 1}</span> <span class="nm">${esc(t.name)}${t.me ? " (you)" : ""}</span></td>
         <td class="num ${t.score > 0 ? "up" : t.score < 0 ? "dn" : "muted"}">${t.count ? signed(t.score) : "–"}</td>
         <td class="num muted">${t.count ? signed(t.espn_score) : "–"}</td>
         <td class="num">${t.count ? `${t.starters.toLocaleString()} <span class="muted">#${t.starters_rank}</span>` : "–"}</td>
-        <td>${t.me ? "" : `<select data-slot="${t.slot}">${opts}</select><span class="model">${modelTxt(t)}</span>`}</td>
+        <td class="model">${modelTxt(t)}</td>
         <td><span class="toggle${t.auto ? " on" : ""}" data-slot="${t.slot}" data-on="${t.auto ? 0 : 1}">${t.auto ? "AUTO" : ""}<span class="sw"></span></span></td>
       </tr>`;
     }).join("") + `</tbody></table>`;
@@ -556,11 +558,6 @@ async function record(id, name) {
   $("q").value = ""; $("results").className = "results";
   refresh();
 }
-async function setStrategy(slot, strategy) {
-  const res = await api("/api/strategy", {slot, strategy});
-  showMsg(res.ok ? res.message : res.error, !res.ok);
-  lastRender = ""; refresh();
-}
 function matches(q) {
   q = q.trim().toLowerCase();
   if (!q) return [];
@@ -607,9 +604,6 @@ document.addEventListener("click", (e) => {
   const tg = e.target.closest(".toggle");
   if (tg) { api("/api/auto", {slot: Number(tg.dataset.slot), on: tg.dataset.on === "1"}).then(() => { lastRender = ""; refresh(); }); return; }
   if (!e.target.closest(".entry")) $("results").className = "results";
-});
-document.addEventListener("change", (e) => {
-  if (e.target.matches("select[data-slot]")) setStrategy(Number(e.target.dataset.slot), e.target.value);
 });
 $("undo").onclick = async () => {
   const btn = $("undo");

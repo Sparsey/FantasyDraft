@@ -77,9 +77,11 @@ the same file resumes.
   players; arrows show chances that moved since the last pick. **Sleepers**
   lists players your sources rate well above ESPN. `+` (only without a live
   feed) records a player as the next pick.
-- **Teams:** rolling score (value gained vs. pick slot), starting-lineup
-  rank, the model used for each team (dropdown, saved to the league file;
-  hover a team for its details) and the autodraft switch.
+- **Teams:** rolling score by your projections and by ESPN's (value gained
+  vs. pick slot), starting-lineup rank, how the simulation predicts each team
+  right now (autodraft, the strategy that best fits their picks so far with how
+  sure it is, or one set in the league file; hover for details) and the
+  autodraft switch.
 - **Troubleshooting log**, collapsed.
 
 ESPN's own room already shows recent picks, your roster and every team's
