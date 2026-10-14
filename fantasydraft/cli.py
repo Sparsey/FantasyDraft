@@ -519,6 +519,22 @@ def cmd_ui(args) -> None:
     serve(dash, args.port, open_browser=not args.no_browser, app_window=not args.tab)
 
 
+def cmd_mock_draft(args) -> None:
+    """One command for an ESPN mock: league file for this room + dashboard on a new picks file."""
+    import argparse
+
+    league = Path(args.league)
+    cmd_new_league(argparse.Namespace(
+        out=str(league), teams=args.teams, my_pick=args.pick, players=None, names=None,
+        strategy="unknown", noise=0.2, like=args.like, force=True))
+    Path("mocks").mkdir(exist_ok=True)
+    picks = Path("mocks") / time.strftime("mock-%Y%m%d-%H%M.txt")
+    print(f"picks go to {picks}")
+    cmd_ui(argparse.Namespace(players=None, league=str(league), picks=str(picks), seed=0,
+                              sims=args.sims, candidates=8, out=str(picks.with_suffix(".feed.jsonl")),
+                              port=8765, no_browser=False, tab=False))
+
+
 def cmd_room(args) -> None:
     """Follow an ESPN draft room through the browser userscript; write picks.txt live."""
     from .capture import serve
@@ -769,6 +785,14 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--no-browser", action="store_true", help="don't open the dashboard automatically")
     p.add_argument("--tab", action="store_true", help="open in a normal browser tab instead of its own window")
     p.set_defaults(func=cmd_ui)
+
+    p = sub.add_parser("mock-draft", help="ESPN mock in one step: league file for the room + dashboard")
+    p.add_argument("--teams", type=int, required=True, help="number of teams in the mock room")
+    p.add_argument("--pick", type=int, required=True, help="your draft position in the room")
+    p.add_argument("--league", default="mock.json", help="league file to (re)write for this mock")
+    p.add_argument("--like", default="league.json", help="copy players, sources and scoring from this file")
+    p.add_argument("--sims", type=int, default=60)
+    p.set_defaults(func=cmd_mock_draft)
 
     p = sub.add_parser("room", help="follow an ESPN draft room live via the browser userscript (writes picks.txt)")
     files(p)

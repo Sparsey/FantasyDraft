@@ -19,6 +19,18 @@ Works for ESPN mock drafts and real league drafts alike.
 3. The script only runs on espn.com pages with "draft" in the address, and
    only sends data to your own computer (`127.0.0.1`).
 
+## ESPN mock drafts: one command
+
+Join the mock room, note how many teams it has and your draft position, then:
+
+```
+python -m fantasydraft mock-draft --teams 8 --pick 3
+```
+
+It writes `mock.json` for that room (your sheet, sources and scoring copied
+from `league.json`), starts the dashboard on a new picks file in `mocks/`,
+and opens the window. Ctrl+C when you're done.
+
 ## Each draft
 
 1. Create the league file (for a mock: your draft position and team count):
