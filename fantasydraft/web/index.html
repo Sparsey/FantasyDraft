@@ -131,6 +131,7 @@
   tr.avl td span { position: relative; top: -1px; background: var(--panel); padding: 0 6px; }
   tr.avl.half td { border-top-color: var(--warn); color: var(--warn); }
   tr.avl.sure td { border-top-color: var(--good); color: var(--good); }
+  tr.avl.floor td { border-top: 2px solid var(--accent); color: var(--accent); }
   .tline { display: flex; flex-wrap: wrap; gap: 3px 18px; align-items: baseline; color: var(--ink); }
   .tline .tgt { font-size: 14.5px; }
   .likely { font-size: 12px; color: var(--muted); margin-top: 3px; }
@@ -260,30 +261,24 @@ function gambleWhy(g) {
 function tagTxt(x, r) {
   let t = "";
   if (x.is_target) t += `<span class="ptag tgt" title="The pick to aim for: best final roster on average, weighing how good he is against his chance of being there">TARGET</span>`;
-  if (x.is_floor) t += `<span class="ptag flr" title="Your floor: even if every pick before yours took your favourite players, he is still there">FLOOR</span>`;
+  if (x.is_floor) t += `<span class="ptag flr" title="Your floor: whatever the teams before you take, you get someone at least this good (by your projections)">FLOOR</span>`;
   if (x.tag === "safe") t += `<span class="ptag safe" title="ESPN's pick: its top projection among players you can realistically get (what ESPN's board and autodraft go by)">ESPN</span>`;
   if (x.tag === "gamble") t += `<span class="ptag gamble" title="${esc(gambleWhy(r && r.advice && r.advice.gamble) || "Ends with a better final roster than ESPN's pick in at least 40% of simulated drafts")}">GAMBLE</span>`;
   if (x.falling) t += `<span class="ptag fall" title="ESPN ranks him well before your pick, but he has a real chance of lasting to you">FALLING</span>`;
   return t;
 }
-// Divider lines in the board (sorted by your projections): each goes where it
-// best splits the list into "mostly under X% there" above and "mostly X%+ there"
-// below, so a single player ESPN loves more than you can't drag it to the end.
-function splitAt(recs, t) {
-  let best = -1, bestErr = Infinity;
-  for (let k = 0; k <= recs.length; k++) {
-    let err = 0;
-    recs.forEach((x, j) => { const ok = (x.p_now ?? 0) >= t; if (j < k ? ok : !ok) err++; });
-    if (err <= bestErr) { bestErr = err; best = k; }  // ties: the lower line (never overstate)
-  }
-  return best > 0 && best < recs.length ? best : (best === 0 ? 0 : -1);
-}
+// Divider lines in the board (sorted by your projections). Each line is
+// drawn under the first player where the chance that the best player left for
+// you at your pick is him or someone better reaches 50% / 90%; the FLOOR is the
+// 100% line: whatever the teams before you take, someone above it is there.
 function availLine(r, i, cols) {
-  if (!S.status.picks_until || !r.recs.length || r.recs[0].p_now == null) return "";
-  const at = S.status.my_next, sure = splitAt(r.recs, 0.9), half = splitAt(r.recs, 0.5);
+  if (!S.status.picks_until || !r.recs.length || r.recs[0].p_best_up == null || i === 0) return "";
+  const prev = r.recs[i - 1], at = S.status.my_next;
+  const crossed = (t) => (prev.p_best_up ?? 0) >= t && (i < 2 || (r.recs[i - 2].p_best_up ?? 0) < t);
   const row = (c, t) => `<tr class="avl ${c}"><td colspan="${cols}"><span>${t}</span></td></tr>`;
-  if (sure === i) return row("sure", `mostly 90%+ there at #${at} from here down`);
-  if (half === i && half !== sure) return row("half", `mostly 50%+ there at #${at} from here down`);
+  if (prev.is_floor) return row("floor", `100%: you get someone above this line at #${at}`);
+  if (crossed(0.9)) return row("sure", `90% chance you get someone above this line at #${at}`);
+  if (crossed(0.5)) return row("half", `50% chance you get someone above this line at #${at}`);
   return "";
 }
 function changeTxt(x) {

@@ -36,6 +36,7 @@ from .room import RoomTracker
 from .simulate import availability, predict_picks
 
 PAGE = Path(__file__).parent / "web" / "index.html"
+TARGET_MIN_AVAIL = 0.5  # the target must have at least this chance of being there at your pick
 
 
 def _pos(p: Player) -> str:
@@ -87,6 +88,8 @@ class Dashboard:
         self.done_version = -1  # last version fully computed
         self._prev_chances: tuple[int | None, dict] = (None, {})  # (my next pick, chances) last time
         self._prev: dict = {}  # chances to compare with in this round of updates
+        self._likely: dict[str, float] = {}  # how often each player was the best left at my pick
+        self._cum: dict[str, float] = {}  # P(the best left for me is this player or better)
         self._target: tuple[int | None, str | None] = (None, None)  # (my next pick, target id) last worked out
         self._suggested: dict[int, dict] = {}  # my pick (0-based) -> what was suggested last
         self._logged: set[int] = set()
@@ -138,7 +141,9 @@ class Dashboard:
                 # Until the new chances are in, show last pick's (same next pick of
                 # yours) so the availability lines don't vanish for a second.
                 mine = st.my_next_picks()
-                old = self._prev_chances[1] if mine and self._prev_chances[0] == mine[0] else None
+                same = bool(mine) and self._prev_chances[0] == mine[0]
+                old = self._prev_chances[1] if same else None
+                self._cum = self._cumulative(st, self._likely if same else {})
                 if not self._publish(version, self._quick(st, old), "quick"):
                     continue
                 probs, outlook = None, None
@@ -148,6 +153,8 @@ class Dashboard:
                     nxt = st.my_next_picks()[0]
                     self._prev = self._prev_chances[1] if self._prev_chances[0] == nxt else {}
                     self._prev_chances = (nxt, probs)
+                    self._likely = likely
+                    self._cum = self._cumulative(st, likely)
                     outlook = self._outlook(st, probs, likely)
                     if not self._publish(version, {**self._quick(st, probs), "outlook": outlook}, "chances"):
                         continue
@@ -238,9 +245,21 @@ class Dashboard:
         return shown, espn_top
 
     @staticmethod
+    def _cumulative(st: DraftState, likely: dict[str, float]) -> dict[str, float]:
+        """For each available player, the chance that the best player left for
+        you at your pick (by your projections) is this player or someone better."""
+        acc, out = 0.0, {}
+        for p in sorted((p for p in st.available() if not is_placeholder(p)),
+                        key=lambda p: p.proj_points, reverse=True):
+            acc += likely.get(p.id, 0.0)
+            out[p.id] = round(min(acc, 1.0), 3)
+        return out
+
+    @staticmethod
     def _floor(st: DraftState) -> str | None:
-        """The guaranteed minimum: with N picks before yours, whatever those
-        teams take, your (N+1)-th best available player is still there."""
+        """The guaranteed minimum: with N picks before yours, at least one of
+        your N+1 best available players is still there whatever those teams
+        take, so you get someone at least as good as the (N+1)-th."""
         before_me = st.my_next_picks()[0] - st.current_pick
         ranked = sorted((p for p in st.available() if not is_placeholder(p)),
                         key=lambda p: p.proj_points, reverse=True)
@@ -250,6 +269,7 @@ class Dashboard:
         on_clock = st.my_next_picks()[0] == st.current_pick
         pr = (probs or {}).get(p.id, [])
         return {**self._player_fields(p), **self._trend(st, p, probs), "is_floor": p.id == self._floor(st),
+                "p_best_up": self._cum.get(p.id),
                 "p_now": 1.0 if on_clock else (pr[0] if pr else None) if probs is not None else None,
                 "p_after": (pr[1] if len(pr) > 1 else 0.0) if probs is not None else None}
 
@@ -301,6 +321,11 @@ class Dashboard:
         if probs is None:
             probs = availability(st, sims=availability_sims(self.sims), seed=1)
         recs = recommend(st, candidates=self.candidates, sims=self.sims, avail=probs)
+        # The target is the best plan among players with an even or better chance
+        # of being there; better players who probably won't last stay listed above.
+        realistic = next((r for r in recs if r.p_avail_now >= TARGET_MIN_AVAIL), None)
+        if realistic is not None:
+            recs = [realistic] + [r for r in recs if r is not realistic]
         advice = self._advice(st, recs, probs)
         baseline, vs = versus_highest_projection(recs)
         gamble = pick_gamble(recs, vs, baseline)
@@ -339,7 +364,7 @@ class Dashboard:
             "p_now": r.p_avail_now, "p_after": r.p_avail_after,
             "value": round(r.exp_final_value),
             **vs_fields(r),
-            "is_target": i == 0, "is_floor": r.player.id == floor,
+            "is_target": i == 0, "is_floor": r.player.id == floor, "p_best_up": self._cum.get(r.player.id),
             "tag": "safe" if baseline and r.player.id == baseline.id
                    else "gamble" if gamble and r.player.id == gamble.id else None,
         } for i, r in enumerate(recs)]
