@@ -116,6 +116,10 @@
   .ptag { font-size: 10px; font-weight: 800; letter-spacing: .04em; border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
   .ptag.safe { color: var(--good); background: var(--good-soft); border: 1px solid var(--good); }
   .ptag.gamble { color: var(--warn); background: var(--warn-soft); border: 1px solid var(--warn); }
+  .gap { display: inline-block; font-weight: 700; border-radius: 5px; padding: 0 6px; font-variant-numeric: tabular-nums; }
+  .gap small { font-weight: 500; opacity: .8; }
+  .gap.gup { color: var(--good); background: var(--good-soft); }
+  .gap.gdn { color: var(--bad); background: var(--bad-soft); }
   .agr { font-size: 10.5px; font-weight: 600; color: var(--muted); margin-left: 4px; }
   .advice { margin: 8px 10px 4px; padding: 8px 11px; border-radius: 8px; font-size: 13px; line-height: 1.45;
             background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
@@ -209,10 +213,18 @@ function bar(p) {
   return `<span class="bar ${cls}"><i><b style="width:${Math.round(p * 100)}%"></b></i><span>${pct(p)}</span></span>`;
 }
 const agreeTxt = (a) => a ? `<span class="agr" title="${a[0]} of ${a[1]} other sources are on this side of ESPN">${a[0]}/${a[1]}</span>` : "";
-const vsEspn = (x) => {
-  if (x.vs_espn == null || !x.sources || x.sources.length < 2) return '<td class="num muted">–</td>';
-  const t = x.sources.map(([n, v]) => n + " " + v.toLocaleString()).join(" · ");
-  return `<td class="num ${x.vs_espn > 0 ? "up" : x.vs_espn < 0 ? "dn" : "muted"}" title="${esc(t)}">${x.vs_espn > 0 ? "+" : ""}${x.vs_espn}${agreeTxt(x.agree)}</td>`;
+// ESPN's projection, yours, and the gap as a coloured pill (hover: each source).
+const projHead = `<th class="num" title="ESPN's projection: what the room sees">ESPN</th>
+  <th class="num" title="Your combined projection (ESPN + your sources)">Mine</th>
+  <th class="num" title="Mine minus ESPN's. Green: your sources like him more than ESPN does. n/m = how many of your other sources agree">Diff</th>`;
+const projCells = (x) => {
+  const d = x.espn != null ? x.proj - x.espn : null;
+  const t = (x.sources || []).map(([n, v]) => n + " " + v.toLocaleString()).join(" · ");
+  const pctTxt = d && x.espn ? ` <small>${d > 0 ? "+" : ""}${Math.round(d / x.espn * 100)}%</small>` : "";
+  const pill = d == null || Math.abs(d) < 1 ? `<span class="muted">same</span>`
+    : `<span class="gap ${d > 0 ? "gup" : "gdn"}">${d > 0 ? "+" : "−"}${Math.abs(d).toLocaleString()}${pctTxt}</span>${agreeTxt(x.agree)}`;
+  return `<td class="num muted">${x.espn != null ? x.espn.toLocaleString() : "–"}</td>
+    <td class="num"><b>${x.proj.toLocaleString()}</b></td><td class="num" title="${esc(t)}">${pill}</td>`;
 };
 function renderAdvice(a) {
   const box = $("advice");
@@ -399,15 +411,15 @@ function renderTable(r) {
   if (tab === "recs") {
     if (!r.recs) { body.innerHTML = `<div class="empty-note">Working out recommendations…</div>`; return; }
     if (!r.recs.length) { body.innerHTML = `<div class="empty-note">Nothing to recommend — your draft is done.</div>`; return; }
-    body.innerHTML = `<table><thead><tr><th>Player</th><th class="num">Rank</th><th class="num">Proj</th>
-      ${r.has_sources ? `<th class="num" title="Your consensus projection minus ESPN's (hover a value for each source)">vs ESPN</th>` : ""}
+    body.innerHTML = `<table><thead><tr><th>Player</th>
+      ${r.has_sources ? projHead : `<th class="num">Proj</th>`}
       <th class="num" title="Chance the player is still there at your next pick">At my pick</th>
       <th class="num" title="Chance the player lasts to the pick after that, if you pass">Lasts</th>
       <th class="num" title="Final roster value (by your consensus numbers) compared with taking ESPN's top-projected player, the SAFE pick (averaged over simulated drafts)">vs SAFE</th>
       ${manual() ? "<th></th>" : ""}</tr></thead><tbody>` +
       r.recs.map((x, i) => `<tr class="${i === 0 ? "top" : ""}" title="Final roster value ${x.value.toLocaleString()}">
         <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span>${tagTxt(x)}</td>
-        <td class="num muted">${x.rank ?? "–"}</td><td class="num">${x.proj}</td>${r.has_sources ? vsEspn(x) : ""}
+        ${r.has_sources ? projCells(x) : `<td class="num">${x.proj.toLocaleString()}</td>`}
         <td class="num">${bar(x.p_now)}</td><td class="num">${bar(x.p_after)}</td>
         ${x.is_baseline ? `<td class="num muted">SAFE</td>`
           : `<td class="num ${x.vs_top > 0 ? "up" : x.vs_top < 0 ? "dn" : "muted"}" title="${esc(riskTip(x))}">${x.vs_top == null ? "–" : (x.vs_top > 0 ? "+" : "") + x.vs_top}</td>`}
@@ -416,13 +428,11 @@ function renderTable(r) {
     const U = r.underrated || [];
     if (!U.length) { body.innerHTML = `<div class="empty-note">No available player that your sources rank well above ESPN.</div>`; return; }
     const mine = S.status.my_picks.slice(0, 2);
-    body.innerHTML = `<table><thead><tr><th>Player</th><th class="num" title="Rank among available players by your consensus">Mine</th><th class="num" title="Rank among available players by ESPN's projection (what the room drafts by)">ESPN</th>
-      <th class="num">Consensus</th><th class="num">ESPN proj</th><th class="num" title="How much the sources disagree">±</th>` +
+    body.innerHTML = `<table><thead><tr><th>Player</th>${projHead}<th class="num" title="How much your sources disagree with each other">±</th>` +
       mine.map((m) => `<th class="num">At #${m}</th>`).join("") + (manual() ? "<th></th>" : "") + `</tr></thead><tbody>` +
       U.map((x) => `<tr title="${esc(x.sources.map(([n, v]) => n + " " + v.toLocaleString()).join(" · "))}">
         <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span></td>
-        <td class="num"><b>${x.my_rank}</b></td><td class="num muted">${x.espn_rank}</td><td class="num">${x.proj}${agreeTxt(x.agree)}</td>
-        <td class="num muted">${x.espn}</td><td class="num muted">${x.spread}</td>` +
+        ${projCells(x)}<td class="num muted">${x.spread}</td>` +
         mine.map((_, k) => `<td class="num">${bar(x.p[k])}</td>`).join("") + (manual() ? `<td>${addBtn(x.id)}</td>` : "") + `</tr>`).join("") + `</tbody></table>`;
   }
 }

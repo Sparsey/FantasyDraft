@@ -163,6 +163,7 @@ class Dashboard:
                 "team": r.player.nba_team, "proj": round(r.player.proj_points),
                 "rank": _num(r.player.espn_rank), "gain": round(r.marginal_now),
                 "vs_espn": round(r.player.proj_points - r.player.room_points),
+                "espn": round(r.player.room_points),
                 "sources": [[n, round(v)] for n, v in r.player.sources], "agree": _agree(r.player),
                 "p_now": r.p_avail_now, "p_after": r.p_avail_after,
                 "value": round(r.exp_final_value), "vs_best": round(r.exp_final_value - best),
