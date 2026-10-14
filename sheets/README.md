@@ -75,6 +75,16 @@ the draft room shows them. The gap between the two is your edge.
    source compares with ESPN overall ("median vs ESPN" should be near 1.00
    when the scoring matches), and the players ESPN under- and overrates.
 
+Each source counts equally by default (ESPN included). A source can instead
+be given a weight, and for **last season's actual stats** you should use
+per-game numbers × the games the projection sources expect, so players who
+missed time last season aren't punished for it:
+
+```json
+"lastseason": {"url": "https://www.basketball-reference.com/leagues/NBA_2026_per_game.html",
+               "weight": 0.5, "games": "projected"}
+```
+
 Columns are found by header: player name, GP, PTS, REB/TREB, AST, STL, BLK,
 TO, 3PM (even when Sheets turns it into "3:00 PM"), and FG%/FT% as
 `0.573(10.5/18.3)` or separate FGM/FGA/FTM/FTA. Per-game stats are

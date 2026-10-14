@@ -46,7 +46,7 @@ python -m fantasydraft watch --league examples/league.json
    | `position_targets` | roster balance, e.g. `{"PG": 3, "SG": 3, "SF": 2, "PF": 2, "C": 3}`. Default: an even split rounded up (3 each for 13 players). Multi-position players count wherever there's room |
    | `learn_noise` | learn each opponent's noise (and show their best-fitting strategy) from their picks; default `true` |
    | `position_bias` | opponents (not on autodraft) are less likely to take a player at a position they've already filled to the targets: that player's draft slot is pushed back by this fraction (default `0.35`; `0` turns it off) |
-   | `sources` | extra projection sources `{name: sheet-tab link or CSV}`, averaged with ESPN into your value (see [sheets/README.md](sheets/README.md#extra-projection-sources)) |
+   | `sources` | extra projection sources `{name: link}` or `{name: {"url": ..., "weight": 0.5, "games": "projected"}}`, averaged with ESPN into your value (see [sheets/README.md](sheets/README.md#extra-projection-sources)) |
    | `scoring` | fantasy points per stat, e.g. `{"PTS": 1, "REB": 1, "AST": 2, "STL": 4, "BLK": 4, "TO": -2, ...}`; default ESPN standard points; `fetch-league` fills it |
    | `balance_penalty` | how much a player beyond the targets is discounted (default `0.2` = worth 80%; `0` turns balancing off) |
 

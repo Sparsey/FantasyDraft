@@ -32,6 +32,8 @@ from statistics import mean, pstdev
 from .io import _norm, _read_text
 from .models import Player
 
+DEFAULT_GAMES = 70.0  # games played when a source gives none
+
 # ESPN's default head-to-head points scoring.
 DEFAULT_SCORING = {"PTS": 1, "3PM": 1, "FGM": 2, "FGA": -1, "FTM": 1, "FTA": -1,
                    "REB": 1, "AST": 2, "STL": 4, "BLK": 4, "TO": -2}
@@ -79,7 +81,8 @@ def clean_name(cell: str) -> str:
         first, rest = full.split(" ", 1)
         if cell[k:] == f"{first[0]}.{rest}":
             return full
-    return re.sub(r"\s*\(.*?\)\s*$", "", cell)  # "Name (TEAM - PG)" style
+    # "Name (TEAM - PG)" or FantasyPros' "Name(BKN - SF,PF)DTD": cut at the bracket.
+    return re.sub(r"\s*\(.*$", "", cell).strip()
 
 
 def _num(cell: str) -> float | None:
@@ -96,6 +99,7 @@ class SourceLine:
     gp: float | None
     stats: dict[str, float]  # season totals (or per game x GP)
     per_game: bool
+    game_stats: dict[str, float] | None = None  # per-game stats, when GP is known or the source is per game
 
 
 class _Tables(HTMLParser):
@@ -197,10 +201,13 @@ def read_source(src: str) -> list[SourceLine]:
     per_game = max(s["PTS"] for _, s, _ in raw) < 60
     out = []
     for name, stats, gp in raw:
+        stats = {k: v for k, v in stats.items() if k not in ("FG%", "FT%")}
         if per_game:
-            games = gp if gp else 70.0
-            stats = {k: v * games for k, v in stats.items() if k not in ("FG%", "FT%")}
-        out.append(SourceLine(name, gp, stats, per_game))
+            game_stats = stats
+            stats = {k: v * (gp if gp else DEFAULT_GAMES) for k, v in stats.items()}
+        else:
+            game_stats = {k: v / gp for k, v in stats.items()} if gp else None
+        out.append(SourceLine(name, gp, stats, per_game, game_stats))
     return out
 
 
@@ -219,47 +226,90 @@ class SourceReport:
     missing_stats: list[str]
     scale: float  # median source/ESPN points ratio for matched players
     calibrated: bool
+    weight: float = 1.0
+    games: str = "source"
 
 
-def apply_sources(players: dict[str, Player], sources: dict[str, str],
+def source_config(value) -> dict:
+    """A source entry: a link/path, or {"url": ..., "weight": 0.5, "games": "projected"}.
+
+    games "projected": use the source's per-game numbers x the games other
+    sources project for the player (for last season's actual stats, where
+    injured players' totals would otherwise look terrible).
+    """
+    if isinstance(value, str):
+        return {"url": value, "weight": 1.0, "games": "source"}
+    cfg = {"weight": 1.0, "games": "source", **value}
+    if cfg["games"] not in ("source", "projected"):
+        raise ValueError(f'source games must be "source" or "projected", not {cfg["games"]!r}')
+    return cfg
+
+
+def apply_sources(players: dict[str, Player], sources: dict[str, object],
                   scoring: dict[str, float] | None = None) -> list[SourceReport]:
     """Replace each player's proj_points with the consensus of ESPN and the sources.
 
     Players with a my_proj override keep it. A source missing scoring stats
     (e.g. no attempts) is rescaled to ESPN's level so it doesn't sit lower
-    across the board just for lacking a column.
+    across the board just for lacking a column. The consensus is a weighted
+    average (ESPN weight 1, others as configured).
     """
     scoring = scoring or DEFAULT_SCORING
     index: dict[str, str] = {}
     for pid, p in players.items():
         index.setdefault(_norm(p.name), pid)
-    per_player: dict[str, list[tuple[str, float]]] = {pid: [("ESPN", p.room_points)] for pid, p in players.items()}
-    reports = []
-    for sname, src in sources.items():
-        lines = read_source(src)
-        found: dict[str, float] = {}
-        unmatched = []
-        missing: set[str] = set()
+    configs = {name: source_config(v) for name, v in sources.items()}
+    loaded: dict[str, list[tuple[str, SourceLine]]] = {}
+    unmatched: dict[str, list[str]] = {}
+    for sname, cfg in configs.items():
+        lines = read_source(cfg["url"])
+        loaded[sname], unmatched[sname] = [], []
         for line in lines:
             pid = index.get(_norm(line.name))
             if pid is None:
-                unmatched.append(line.name)
-                continue
-            pts, miss = fantasy_points(line.stats, scoring)
+                unmatched[sname].append(line.name)
+            else:
+                loaded[sname].append((pid, line))
+    # Games each player is projected to play, from the sources that project games.
+    games: dict[str, list[float]] = {}
+    for sname, cfg in configs.items():
+        if cfg["games"] == "source":
+            for pid, line in loaded[sname]:
+                if line.gp:
+                    games.setdefault(pid, []).append(line.gp)
+
+    per_player: dict[str, list[tuple[str, float, float]]] = {
+        pid: [("ESPN", p.room_points, 1.0)] for pid, p in players.items()}
+    reports = []
+    for sname, cfg in configs.items():
+        found: dict[str, float] = {}
+        missing: set[str] = set()
+        for pid, line in loaded[sname]:
+            if cfg["games"] == "projected":
+                if not line.game_stats:
+                    continue
+                gp = mean(games[pid]) if pid in games else DEFAULT_GAMES
+                stats = {k: v * gp for k, v in line.game_stats.items()}
+            else:
+                stats = line.stats
+            pts, miss = fantasy_points(stats, scoring)
             missing.update(miss)
             found[pid] = pts
         ratios = sorted(found[pid] / players[pid].room_points for pid in found if players[pid].room_points > 0)
         scale = ratios[len(ratios) // 2] if ratios else 1.0
         calibrate = bool(missing) and scale > 0
         for pid, pts in found.items():
-            per_player[pid].append((sname, pts / scale if calibrate else pts))
-        reports.append(SourceReport(sname, len(lines), len(found), unmatched, sorted(missing), scale, calibrate))
+            per_player[pid].append((sname, pts / scale if calibrate else pts, float(cfg["weight"])))
+        reports.append(SourceReport(sname, len(loaded[sname]) + len(unmatched[sname]), len(found),
+                                    unmatched[sname], sorted(missing), scale, calibrate,
+                                    float(cfg["weight"]), cfg["games"]))
     for pid, vals in per_player.items():
         p = players[pid]
-        totals = [v for _, v in vals]
-        consensus = mean(totals)
+        total_w = sum(w for _, _, w in vals)
+        consensus = sum(v * w for _, v, w in vals) / total_w if total_w else p.room_points
+        totals = [v for _, v, _ in vals]
         players[pid] = replace(p, proj_points=p.proj_points if p.overridden else consensus,
-                               sources=tuple((n, round(v, 1)) for n, v in vals),
+                               sources=tuple((n, round(v, 1)) for n, v, _ in vals),
                                spread=pstdev(totals) if len(totals) > 1 else 0.0)
     return reports
 

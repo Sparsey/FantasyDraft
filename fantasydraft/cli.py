@@ -496,7 +496,9 @@ def cmd_sources(args) -> None:
         sys.exit(f'{args.league} has no "sources". Add e.g. "sources": {{"hashtag": "<link to the tab>"}}')
     for r in reports:
         print(f"\n{r.name}: {r.rows} rows, {r.matched} matched to your players"
-              f" | median vs ESPN: {r.scale:.2f}x" + (" (rescaled to ESPN)" if r.calibrated else ""))
+              f" | median vs ESPN: {r.scale:.2f}x" + (" (rescaled to ESPN)" if r.calibrated else "")
+              + (f" | weight {r.weight:g}" if r.weight != 1 else "")
+              + (" | per game x projected games" if r.games == "projected" else ""))
         if r.missing_stats:
             print(f"  missing scoring stats: {', '.join(r.missing_stats)}")
         if r.unmatched:

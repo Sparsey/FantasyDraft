@@ -554,3 +554,21 @@ def test_source_from_html_page(tmp_path):
     lines = read_source(str(f))
     assert [l.name for l in lines] == ["Nikola Jokić"]
     assert lines[0].stats["FGM"] == pytest.approx(11.2 * 70)
+
+
+def test_source_weights_and_projected_games(tmp_path):
+    from fantasydraft.sources import apply_sources, clean_name
+
+    assert clean_name("Michael Porter Jr.(BKN - SF,PF)DTD") == "Michael Porter Jr."
+    proj = tmp_path / "proj.csv"
+    proj.write_text("PLAYER,GP,PTS,REB,AST,STL,BLK,TO,3PM\nInjured Star,70,30,5,5,1,1,3,2\n")
+    last = tmp_path / "last.csv"  # played only 10 games last season
+    last.write_text("Player,G,PTS,TRB,AST,STL,BLK,TOV,3P\nInjured Star,10,30,5,5,1,1,3,2\n")
+    scoring = {"PTS": 1}
+    players = {"s": Player("s", "Injured Star", frozenset({"PG"}), 2100.0, 1, espn_points=2100.0)}
+    apply_sources(players, {"proj": str(proj),
+                            "last": {"url": str(last), "weight": 0.5, "games": "projected"}}, scoring)
+    vals = dict(players["s"].sources)
+    assert vals["last"] == pytest.approx(30 * 70)  # per game x projected 70 games, not x 10
+    # weighted: (2100*1 + 2100*1 + 2100*0.5) / 2.5
+    assert players["s"].proj_points == pytest.approx(2100)
