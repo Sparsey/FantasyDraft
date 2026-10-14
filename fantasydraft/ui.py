@@ -368,7 +368,7 @@ class Dashboard:
                     continue
                 best = max(f.fit, key=f.fit.get) if f else None
                 # A team that always takes the top ESPN rank looks like autodraft.
-                suggested = "auto" if t.picks >= 3 and t.top_rank_rate >= 0.9 else \
+                suggested = "rank" if t.picks >= 3 and t.top_rank_rate >= 0.9 else \
                     best if f and f.fit[best] >= 0.6 else None
                 rows.append({
                     "picks": t.picks, "auto_picks": t.auto_picks,
@@ -387,7 +387,7 @@ class Dashboard:
         lg = self.league
         if not 0 <= slot < lg.num_teams:
             raise ValueError("no such team")
-        if strategy not in TeamProfile.VALID_STRATEGIES:
+        if strategy not in TeamProfile.VALID_STRATEGIES or strategy == "auto":
             raise ValueError(f"unknown strategy {strategy!r}")
         lg.teams[slot] = replace(lg.teams[slot], strategy=strategy)
         cfg = json.loads(self.league_path.read_text(encoding="utf-8"))

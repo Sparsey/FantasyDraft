@@ -67,7 +67,7 @@ class RoomTracker:
         return [e[1] for e in self.entries if e[0] == "pick"]
 
     def auto_slots(self) -> set[int]:
-        on: set[int] = set()
+        on: set[int] = set(self.league.start_auto)
         for e in self.entries:
             if e[0] == "auto":
                 (on.add if e[2] else on.discard)(e[1])

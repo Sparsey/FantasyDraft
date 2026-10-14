@@ -794,3 +794,14 @@ def test_gamble_is_a_favourable_coin_flip():
     assert pick_gamble(recs, vs, recs[0].player).name == "flip"
     vs["flip"] = VsBaseline(-200, 0.45, 100, 0.55, -450)  # costs too much on average
     assert pick_gamble(recs, vs, recs[0].player) is None
+
+
+def test_auto_in_league_file_is_the_autodraft_switch(tmp_path):
+    from fantasydraft.io import apply_log, load_league
+    lg = load_league("examples/league.json")
+    frank = next(i for i, t in enumerate(lg.teams) if t.name == "Frank")
+    assert frank in lg.start_auto and lg.teams[frank].strategy == "rank"
+    st = DraftState(lg, {})
+    assert frank in st.auto_teams and st.profile(frank).strategy == "auto"
+    apply_log(st, [("auto", frank, False)])  # switched off in the room
+    assert st.profile(frank).strategy == "rank"

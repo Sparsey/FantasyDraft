@@ -237,7 +237,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const pct = (x) => x == null ? "–" : x <= 0 ? "0%" : x >= 1 ? "100%" : x < 0.01 ? "<1%" : x > 0.99 ? ">99%" : Math.round(x * 100) + "%";
 const signed = (x) => (x > 0 ? "+" : "") + x;
-const STRATS = {unknown: "Unknown: learn from their picks", auto: "Autodraft (ESPN rank, no randomness)", adp: "Around ADP", rank: "Follows ESPN rank, loosely", points: "By projected points", balanced: "Balanced builder: best value for their roster, avoids piling up a position", feel: "By feel: picks fairly evenly among ESPN's top ~8"};
+const STRATS = {unknown: "Unknown: learn from their picks", adp: "Around ADP", rank: "Follows ESPN rank, loosely", points: "By projected points", balanced: "Balanced builder: best value for their roster, avoids piling up a position", feel: "By feel: picks fairly evenly among ESPN's top ~8"};
 let S = null, players = [], playersVersion = -1, tab = "recs", clockAt = 0, sel = 0, lastRender = "";
 
 function bar(p) {
@@ -408,7 +408,7 @@ function renderTeams() {
     return `<div class="team${t.me ? " me" : ""}${st.on_clock && st.on_clock.slot === t.slot ? " onclock" : ""}">
       <div class="trow"><span class="n">${t.slot + 1}</span><span class="nm" title="${esc(t.name)}">${esc(t.name)}${t.me ? " (you)" : ""}</span>
         ${t.me ? "" : `<select data-slot="${t.slot}" title="How the simulation models this team">${opts}</select>`}
-        <span class="toggle${t.auto ? " on" : ""}" data-slot="${t.slot}" data-on="${t.auto ? 0 : 1}" title="Mark as on/off autodraft right now">${t.auto ? "AUTO" : "auto"}<span class="sw"></span></span>
+        <span class="toggle${t.auto ? " on" : ""}" data-slot="${t.slot}" data-on="${t.auto ? 0 : 1}" title="On autodraft right now (ESPN picks for them by its rank, no randomness). Follows the draft room automatically; click to set it by hand.">${t.auto ? "AUTO" : "auto"}<span class="sw"></span></span>
       </div>
       ${t.manager || (t.view && t.view !== "espn") || t.favorite_team ? `<div class="tsub">${t.manager ? esc(t.manager) : ""}${t.view && t.view !== "espn" ? ` · trusts <b>${t.view === "mix" ? "ESPN + outside" : "outside research"}</b>` : ""}${t.favorite_team ? ` · ${esc(t.favorite_team)} fan` : ""}</div>` : ""}
       <div class="tsub last">${t.count} picked${t.last ? " · last: " + esc(t.last) : ""}${t.full.length ? ` · <span title="At their position target: the simulation makes them less likely to take more">full: <b>${t.full.join(", ")}</b></span>` : ""}</div>

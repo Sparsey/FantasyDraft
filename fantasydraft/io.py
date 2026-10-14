@@ -8,6 +8,7 @@ import re
 import sys
 import unicodedata
 import urllib.request
+from dataclasses import replace
 from pathlib import Path
 
 from .models import DEFAULT_ROSTER_SLOTS, POSITIONS, DraftState, League, Player, TeamProfile
@@ -172,6 +173,10 @@ def load_league(path: str | Path) -> League:
     my_slot = next((i for i, t in enumerate(teams) if t.name == my), None) if isinstance(my, str) else my - 1
     if my_slot is None:
         raise ValueError(f"my_team {my!r} not found in teams")
+    # "auto" in the file means "starts on autodraft": that's the autodraft
+    # switch, and if they switch it off they're modelled as following ESPN's rank.
+    start_auto = frozenset(i for i, t in enumerate(teams) if t.strategy == "auto" and i != my_slot)
+    teams = [replace(t, strategy="rank") if t.strategy == "auto" else t for t in teams]
     return League(
         teams=teams,
         my_slot=my_slot,
@@ -181,6 +186,7 @@ def load_league(path: str | Path) -> League:
         balance_penalty=float(cfg.get("balance_penalty", 0.2)),
         learn_noise=bool(cfg.get("learn_noise", True)),
         position_bias=float(cfg.get("position_bias", 0.35)),
+        start_auto=start_auto,
     )
 
 

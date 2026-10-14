@@ -128,6 +128,9 @@ class League:
     # Opponents (not on autodraft) avoid positions they've already filled to
     # the targets: such players' draft slot is pushed back by this fraction.
     position_bias: float = 0.35
+    # Teams that start the draft on autodraft (saved strategy "auto" in the
+    # league file). It's the same flag as the live autodraft switch.
+    start_auto: frozenset[int] = frozenset()
 
     def __post_init__(self) -> None:
         for slot in self.roster_slots:
@@ -186,6 +189,9 @@ class DraftState:
     auto_teams: set[int] = field(default_factory=set)
     # Indices into `picks` that were made while the picking team was on auto.
     auto_picks: set[int] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        self.auto_teams |= set(self.league.start_auto)
 
     def profile(self, team: int) -> TeamProfile:
         base = self.league.teams[team]
