@@ -52,7 +52,11 @@ class RoomTracker:
         self.recent_log: deque[str] = deque(maxlen=60)
         self.page_done: int | None = None  # picks made so far, per the draft page
         self._replaying = False  # replaying held messages: their clock values are stale
-        self.resumed = bool(self.entries)  # restarted mid-draft: picks may have been missed meanwhile
+        self.resumed = bool(self.entries)
+        # The draft's real number of teams, when it turns out to differ from the
+        # league file (negative: "at least this many"); and who picked last.
+        self.team_count: int | None = None
+        self.last_team: int | None = None  # restarted mid-draft: picks may have been missed meanwhile
         # The ESPN team id -> slot mapping is kept next to the picks file, so a
         # restart mid-draft doesn't have to relearn it from whoever is on the clock.
         self.map_path = self.path.with_name(self.path.name + ".teams.json")
@@ -211,6 +215,15 @@ class RoomTracker:
         self.log(f"   {self.name(slot)} {'is ON autodraft' if on else 'is back from autodraft'}")
         return True
 
+    def _team_count_text(self) -> str:
+        c = self.team_count
+        return "?" if c is None else str(c) if c > 0 else f"at least {-c}"
+
+    def my_draft_position(self) -> int | None:
+        """Your draft position (1-based) as the draft room showed it, if known."""
+        slot = self.team_slot.get(self.my_team_id) if self.my_team_id is not None else None
+        return None if slot is None else slot + 1
+
     def _out_of_sync(self, why: str) -> None:
         if not self.blocked:
             self.log(f"!! Lost track of the draft ({why}). Holding new picks until it resyncs "
@@ -281,9 +294,18 @@ class RoomTracker:
             self.log(f"!! more picks than the league file allows ({self.league.total_picks}); check its size")
             return
         if not self._map(team_id, pick):
+            n = self.league.num_teams
+            if self.team_count is None and pick < 2 * n:
+                if team_id == self.last_team and 0 < pick < n:
+                    self.team_count = pick  # the snake turned early: only `pick` teams
+                elif pick >= n and team_id not in self.team_slot:
+                    self.team_count = -(pick + 1)  # a new team after the file's last one
+                if self.team_count:
+                    self.log(f"!! This draft has {self._team_count_text()} teams, but your league file has {n}.")
             self._out_of_sync(f"team {team_id} picked at pick {pick + 1}")
             self.buffer.append(f"SELECTED {team_id} {pid} 0" + (" x" if by_person else ""))
             return
+        self.last_team = team_id
         slot = self.team_slot[team_id]
         # The pick itself tells us whether a person or autodraft made it.
         self._set_auto(slot, not by_person)
@@ -301,6 +323,14 @@ class RoomTracker:
     # --- page text: resync after joining mid-draft --------------------------------
 
     def handle_page_text(self, text: str) -> None:
+        first_round = [int(pos) for _, rnd, pos, _ in PICK_LINE.findall(text) if rnd == "1"]
+        # A full first round in the pick list shows the real number of teams.
+        if first_round and max(first_round) != self.league.num_teams and \
+                (max(first_round) > self.league.num_teams or "R2," in text):
+            if self.team_count != max(first_round):
+                self.team_count = max(first_round)
+                self.log(f"!! This draft has {self.team_count} teams, but your league file has "
+                         f"{self.league.num_teams}.")
         for name, rnd, pos, team in PICK_LINE.findall(text):
             n = self.league.num_teams
             r, p = int(rnd), int(pos)

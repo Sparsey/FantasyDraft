@@ -307,6 +307,15 @@ function render() {
     missTxt = n === 1 ? `Pick #${first} is missing` : `Picks #${first}–#${first + n - 1} are missing`;
   }
   const waiting = f.blocked && (!f.missing || f.missing[1] === 0);
+  if (f.team_count) {  // wrong number of teams in the league file: say exactly how to fix it
+    const n = f.team_count > 0 ? f.team_count : null;
+    const pos = f.my_position ? f.my_position : "<your position>";
+    b.className = "banner show";
+    b.innerHTML = `This draft has <b>${n ?? "more than " + f.file_teams}</b> teams but ${esc(f.league_file)} has ${f.file_teams}. ` +
+      `Close the dashboard (Ctrl+C in the terminal) and run:<br><code>python -m fantasydraft new-league ${esc(f.league_file)} --teams ${n ?? "N"} --my-pick ${pos} --force</code><br>` +
+      `then start it again with the same picks file (<code>--picks ${esc(f.picks_file)}</code>); it picks up where it left off.` +
+      (n ? "" : " (N = the number of teams in the draft room's pick order.)");
+  } else
   b.textContent = !f.blocked ? "" : waiting
     ? "Checking the pick count against the draft page… New picks are held until it matches. " +
       "If this doesn't clear in a few seconds, open the draft room's Pick History."

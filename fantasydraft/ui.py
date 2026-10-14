@@ -25,7 +25,8 @@ from pathlib import Path
 
 from .analyze import analyze, draft_scores
 from .drafters import add_to_counts, full_positions
-from .io import apply_log, apply_manager, is_placeholder, league_managers, load_state, match_manager
+from .io import (apply_log, apply_manager, is_placeholder, league_managers, load_state, match_manager,
+                 players_source)
 from .learn import fit_teams
 from .lineup import over_targets, target_fill
 from .models import DraftState, Player, TeamProfile
@@ -55,9 +56,19 @@ def _num(x: float) -> float | None:
 
 class Dashboard:
     def __init__(self, players_src, league_path, picks_path, raw_log, sims: int, candidates: int):
+        src = players_src or players_source(league_path)
+        print(f"Players from: {src}", flush=True)
         state = load_state(players_src, league_path, None)
         self.league = state.league
         self.players = state.players
+        ps = list(self.players.values())
+        mine = sum(p.overridden for p in ps)
+        mixed = sum(len(p.sources) > 1 for p in ps)
+        print(f"  {len(ps)} players; {mine} with your my_proj; {mixed} with extra sources averaged in"
+              + ("" if mixed else "  <- no extra sources: 'Mine' will equal ESPN") , flush=True)
+        if not str(src).startswith("http"):
+            print("  (a local file, not your Google Sheet: set \"players\" in the league file to the sheet link)", flush=True)
+        print(f"  {self.league.num_teams} teams, you pick #{self.league.my_slot + 1}", flush=True)
         self.league_path = Path(league_path)
         self.managers = league_managers(league_path)
         self._tendencies: tuple[int, list] = (-1, [])
@@ -311,6 +322,11 @@ class Dashboard:
                 "last_message_age": None if tr.last_feed is None else time.time() - tr.last_feed,
                 "blocked": tr.blocked,
                 "missing": tr.missing(),
+                "team_count": tr.team_count,
+                "file_teams": lg.num_teams,
+                "my_position": tr.my_draft_position(),
+                "league_file": self.league_path.name,
+                "picks_file": tr.path.name,
             }
             seconds_left = tr.seconds_left()
             log = list(tr.recent_log)[-12:]

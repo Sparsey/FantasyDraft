@@ -318,7 +318,11 @@ def cmd_new_league(args) -> None:
         if args.players:
             keep.pop("players", None)
         cfg = {**cfg, **keep}
-        print(f"copied players, sources and settings from {like}")
+        print(f"copied players, sources and settings from {like}: players = {cfg['players']}, "
+              f"{len(cfg.get('sources') or {})} extra sources")
+    elif not args.players:
+        print(f"warning: {args.like} not found here, so players come from {cfg['players']} "
+              "(not your sheet). Run this in your FantasyDraft folder, or pass --players <sheet link>.")
     out.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {out}: {args.teams} teams, you pick #{args.my_pick}, others '{args.strategy}'")
 

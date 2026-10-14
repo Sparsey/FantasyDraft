@@ -977,3 +977,31 @@ def test_fetch_league_keeps_your_edits(tmp_path, monkeypatch):
     assert cfg["my_team"] == "Mine"
     bravo = cfg["teams"][2]
     assert bravo["strategy"] == "feel" and bravo["espn_id"] == 12  # renamed on ESPN, still matched
+
+
+def test_wrong_team_count_is_detected_and_restart_recovers(tmp_path):
+    from fantasydraft.room import RoomTracker
+
+    players = load_players(SAMPLE)
+    ids = sorted(players, key=lambda p: players[p].espn_rank)
+    espn = [21, 22, 23, 24, 25, 26, 27, 28]  # the real draft has 8 teams; I'm 3rd (team 23)
+    real = League([TeamProfile(f"Team {i + 1}") for i in range(8)], 2)
+    ten = League([TeamProfile(f"Team {i + 1}") for i in range(10)], 2)
+    picks = tmp_path / "mock1.txt"
+    tr = RoomTracker(ten, players, picks, log=lambda _: None)
+    tr.handle_message("TOKEN 1:2:23:x")
+    for k in range(10):
+        t = espn[real.team_for_pick(k)]
+        tr.handle_message(f"SELECTING {t} 60000")
+        tr.handle_message(f"SELECTED {t} {ids[k]} 1 m")
+    assert tr.team_count == 8 and tr.my_draft_position() == 3
+    assert len(tr.picks) == 8 and tr.blocked
+    # Fixed league file, same picks file: carries on from the page's pick list.
+    tr2 = RoomTracker(real, players, picks, log=lambda _: None)
+    lines = [f"{players[ids[k]].name} / BOS PG\nR{k // 8 + 1}, P{k % 8 + 1} - Team" for k in range(12)]
+    tr2.handle_page_text("\n".join(lines) + "\nON THE CLOCK: PICK 13")
+    assert not tr2.blocked and tr2.picks == ids[:12]
+    t = espn[real.team_for_pick(12)]
+    tr2.handle_message(f"SELECTING {t} 60000")
+    tr2.handle_message(f"SELECTED {t} {ids[12]} 1 m")
+    assert tr2.picks == ids[:13] and not tr2.blocked
