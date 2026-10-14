@@ -772,6 +772,17 @@ def test_versus_highest_projection_split():
     assert c.diff >= 400 and c.p_better == 1.0 and c.p_worse == 0.0
 
 
+def test_safe_baseline_is_espns_top_projection():
+    from dataclasses import replace
+    from fantasydraft.recommend import versus_highest_projection
+
+    def R(name, mine, espn):
+        return Recommendation(replace(Player(name, name, frozenset({"PG"}), mine), espn_points=espn), 0, 1, 0, 0, [mine])
+    recs = [R("consensus top", 3000.0, 2500.0), R("espn top", 2800.0, 2900.0)]
+    base, vs = versus_highest_projection(recs)
+    assert base.name == "espn top" and vs["consensus top"].diff == 200
+
+
 def test_gamble_is_a_favourable_coin_flip():
     from fantasydraft.recommend import VsBaseline, pick_gamble
 

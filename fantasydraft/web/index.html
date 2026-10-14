@@ -261,17 +261,17 @@ function renderAdvice(a) {
       ${pct(g.p_better)} chance of a better final roster (avg +${g.avg_up}), ${pct(g.p_worse)} worse (avg ${g.avg_down}).
       Overall ${g.diff >= 0 ? "+" : ""}${g.diff}.</div>` : "";
   if (a.kind === "same") {
-    box.innerHTML = `<span class="ptag safe" style="margin:0 6px 0 0">SAFE</span>Top pick at #${a.pick}: <b>${esc(a.top)}</b>, the highest-projected player you can get.` + gl;
+    box.innerHTML = `<span class="ptag safe" style="margin:0 6px 0 0">SAFE</span>Top pick at #${a.pick}: <b>${esc(a.top)}</b>, ESPN's top-projected player available.` + gl;
     return;
   }
   const head = a.kind === "close"
-    ? `Close call at #${a.pick}: <b>${esc(a.top)}</b> (${a.top_proj.toLocaleString()}) edges out the highest-projected <b>${esc(a.best)}</b> (${a.best_proj.toLocaleString()}) by only ${a.gain} pts of final roster value. Either is fine.`
-    : `Take <b>${esc(a.top)}</b> (${a.top_proj.toLocaleString()}) over the highest-projected <b>${esc(a.best)}</b> (${a.best_proj.toLocaleString()}) at #${a.pick}: about <b>+${a.gain}</b> pts for your final roster.`;
+    ? `Close call at #${a.pick}: <b>${esc(a.top)}</b> (${a.top_proj.toLocaleString()}) edges out ESPN's top-projected <b>${esc(a.best)}</b> (ESPN ${a.best_proj.toLocaleString()}) by only ${a.gain} pts of final roster value. Either is fine.`
+    : `Take <b>${esc(a.top)}</b> (${a.top_proj.toLocaleString()}) over ESPN's top-projected <b>${esc(a.best)}</b> (ESPN ${a.best_proj.toLocaleString()}) at #${a.pick}: about <b>+${a.gain}</b> pts for your final roster.`;
   box.innerHTML = head + `<ul>${a.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` +
     (g && g.name !== a.top ? gl : "");
 }
 function tagTxt(x) {
-  if (x.tag === "safe") return `<span class="ptag safe" title="Highest projected points available now">SAFE</span>`;
+  if (x.tag === "safe") return `<span class="ptag safe" title="Highest ESPN projection available now (what ESPN's board / autodraft would take)">SAFE</span>`;
   if (x.tag === "gamble") return `<span class="ptag gamble" title="Taking this player instead ends with a better final roster in many simulated drafts (see Better / worse)">GAMBLE</span>`;
   return "";
 }
@@ -433,13 +433,13 @@ function renderTable(r) {
       <th class="num" title="Your consensus projection minus ESPN's (hover a value for each source)">vs ESPN</th>
       <th class="num" title="Chance the player is still there at your next pick">At my pick</th>
       <th class="num" title="Chance the player lasts to the pick after that, if you pass">Lasts</th>
-      <th class="num" title="Final roster value compared with taking the highest-projected player (averaged over simulated drafts)">vs top proj</th>
-      <th title="Across the simulated drafts: how often taking this player ends with a better / worse roster than taking the highest-projected player, and by how much on average">Better / worse</th><th></th></tr></thead><tbody>` +
+      <th class="num" title="Final roster value (by your consensus numbers) compared with taking ESPN's top-projected player, the SAFE pick (averaged over simulated drafts)">vs SAFE</th>
+      <th title="Across the simulated drafts: how often taking this player ends with a better / worse roster than taking the SAFE pick, and by how much on average">Better / worse</th><th></th></tr></thead><tbody>` +
       r.recs.map((x, i) => `<tr class="${i === 0 ? "top" : ""}" title="Final roster value ${x.value.toLocaleString()}">
         <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span>${tagTxt(x)}</td>
         <td class="num muted">${x.rank ?? "–"}</td><td class="num">${x.proj}</td>${vsEspn(x)}
         <td class="num">${bar(x.p_now)}</td><td class="num">${bar(x.p_after)}</td>
-        ${x.is_baseline ? `<td class="num muted">baseline</td><td class="muted" style="font-size:12px">highest projected</td>`
+        ${x.is_baseline ? `<td class="num muted">baseline</td><td class="muted" style="font-size:12px">ESPN's top projection</td>`
           : `<td class="num ${x.vs_top > 0 ? "up" : x.vs_top < 0 ? "dn" : "muted"}">${x.vs_top == null ? "–" : (x.vs_top > 0 ? "+" : "") + x.vs_top}</td>
              <td class="risk">${riskTxt(x)}</td>`}
         <td>${addBtn(x.id)}</td></tr>`).join("") + `</tbody></table>`;

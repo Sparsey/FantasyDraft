@@ -175,11 +175,11 @@ class Dashboard:
 
     @staticmethod
     def _advice(st: DraftState, recs, probs: dict | None = None) -> dict | None:
-        """Plain-language note on whether to take the highest-projected player."""
+        """Plain-language note on whether to take ESPN's top-projected player (SAFE)."""
         if not recs:
             return None
         top = recs[0]
-        best = max(recs, key=lambda r: r.player.proj_points)
+        best = max(recs, key=lambda r: (r.player.room_points, r.player.proj_points))  # ESPN's top
         mine = st.my_next_picks()
         on_clock = mine[0] == st.current_pick
         now_pick = mine[0] + 1
@@ -222,7 +222,7 @@ class Dashboard:
         if not reasons:
             reasons.append("the simulated drafts favour it (timing and roster fit)")
         return {"kind": "close" if gain < 40 else "different", "top": top.player.name,
-                "best": best.player.name, "best_proj": round(best.player.proj_points),
+                "best": best.player.name, "best_proj": round(best.player.room_points),
                 "top_proj": round(top.player.proj_points), "gain": gain, "reasons": reasons,
                 "pick": now_pick}
 

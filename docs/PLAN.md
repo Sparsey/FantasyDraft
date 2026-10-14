@@ -21,6 +21,11 @@
 - In a points league with flexible lineups, "best projected player" is right
   most of the time; position drop-offs (VONA) matter occasionally. The
   dashboard calls those moments out.
+- The dashboard's **SAFE** pick is ESPN's top projection available (what the
+  room and autodraft would take). Every other option is compared with it on
+  final roster value by *your* consensus numbers, so a "+" there is your
+  sources' edge over ESPN's board. **GAMBLE** is the best alternative that
+  ends better in at least 40% of simulated drafts.
 - Benchmarks score rosters with the consensus itself, so they show what the
   edge is worth *if* the consensus is right, not whether it is.
 
