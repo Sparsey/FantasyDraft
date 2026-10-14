@@ -492,9 +492,10 @@ def cmd_replay(args) -> None:
     from .capture import replay_report
 
     state = load_state(args.players, args.league, None)
-    text = replay_report(args.log, state.league, state.players)
+    text = replay_report(args.log, state.league, state.players,
+                         session=args.session - 1 if args.session > 0 else -1)
     Path(args.out).write_text(text, encoding="utf-8")
-    print(text[-2500:])
+    print(text[:6000])
     print(f"\n(full report in {args.out}; it has no cookies or tokens and is fine to share)")
 
 
@@ -809,6 +810,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--league", default="league.json")
     p.add_argument("--players", help=players_help)
     p.add_argument("--out", default="replay_report.txt")
+    p.add_argument("--session", type=int, default=0,
+                   help="which draft in the log (1 = first; default: the last)")
     p.set_defaults(func=cmd_replay)
 
     p = sub.add_parser("capture", help="record ESPN draft-room traffic sent by the browser userscript")

@@ -189,18 +189,56 @@ def summarize(path: str | Path, samples: int = 3) -> str:
     return "\n".join(out)
 
 
-def replay_report(path: str | Path, league, players: dict, max_snapshots: int = 12) -> str:
-    """Replay a dashboard/capture log through the live tracker and report, safely
-    (redacted), where it lost track, why, and what the page text looked like then."""
+def split_sessions(events: list[dict], gap_s: float = 1800) -> list[list[dict]]:
+    """Split a feed log (appended to across runs) into drafts: a new draft starts
+    when the draft page's leagueId changes, or after a long quiet gap."""
+    sessions: list[list[dict]] = []
+    league, last_t = None, None
+    for e in events:
+        t = e.get("t") if isinstance(e.get("t"), (int, float)) else None
+        new = not sessions
+        if e.get("kind") == "hello":
+            m = re.search(r"leagueId=(\d+)", str(e.get("url", "")))
+            if m and league is not None and m.group(1) != league:
+                new = True
+            league = m.group(1) if m else league
+        if t is not None and last_t is not None and (t - last_t) / 1000 > gap_s:
+            new = True
+        if new:
+            sessions.append([])
+        sessions[-1].append(e)
+        last_t = t if t is not None else last_t
+    return sessions
+
+
+def replay_report(path: str | Path, league, players: dict, max_snapshots: int = 6,
+                  session: int = -1) -> str:
+    """Replay one draft from a dashboard/capture log through the live tracker and
+    report, redacted, where it lost track, why, and what the page showed then."""
     import tempfile
 
     from .io import _norm
     from .room import ON_CLOCK, PICK_LINE, RoomTracker
 
-    events = [json.loads(line) for line in Path(path).read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    every = []
+    for line in Path(path).read_text(encoding="utf-8-sig").splitlines():
+        try:
+            every.append(json.loads(line))
+        except json.JSONDecodeError:
+            pass  # blank, or cut off when the dashboard was closed mid-write
+    sessions = split_sessions(every)
+    out = [f"{len(every)} events in {len(sessions)} draft(s):"]
+    for i, ses in enumerate(sessions):
+        ts = [e["t"] for e in ses if isinstance(e.get("t"), (int, float))]
+        sel = sum(1 for e in ses if e.get("kind") == "ws-in" and str(e.get("data", "")).startswith("SELECTED"))
+        when = time.strftime("%b %d %H:%M", time.localtime(ts[0] / 1000)) if ts else "?"
+        out.append(f"  #{i + 1}: {when}, {len(ses)} events, {sel} picks seen")
+    events = sessions[session]
+    out.append(f"\nReplaying draft #{(session % len(sessions)) + 1} "
+               f"(choose another with --session N)")
     names = {_norm(p.name) for p in players.values()}
-    out = [f"{len(events)} events: {dict(Counter(e.get('kind', '?') for e in events))}",
-           f"league file: {league.num_teams} teams, {league.rounds} rounds, you pick #{league.my_slot + 1}", ""]
+    out += [f"{len(events)} events: {dict(Counter(e.get('kind', '?') for e in events))}",
+            f"league file: {league.num_teams} teams, {league.rounds} rounds, you pick #{league.my_slot + 1}", ""]
     lines: list[str] = []
     t0 = next((e["t"] for e in events if isinstance(e.get("t"), (int, float))), 0)
     now = [0.0]
@@ -209,6 +247,7 @@ def replay_report(path: str | Path, league, players: dict, max_snapshots: int = 
                          log=lambda line: lines.append(f"+{now[0]:6.0f}s {line}"))
         shots = 0
         was_blocked = None
+        repeats = 0
         for e in events:
             now[0] = (e.get("t", t0) - t0) / 1000 if isinstance(e.get("t"), (int, float)) else now[0]
             kind = e.get("kind")
@@ -234,8 +273,14 @@ def replay_report(path: str | Path, league, players: dict, max_snapshots: int = 
                     lines.append(f"         page text: {excerpt}")
                 tr.handle_page_text(text)
             if tr.blocked != was_blocked:
-                lines.append(f"+{now[0]:6.0f}s {'BLOCKED: ' + tr.blocked if tr.blocked else 'unblocked'}"
-                             f" (picks known {len(tr.picks)}, held {len(tr.buffer)})")
+                # the same reason with a new pick number: show the first few only
+                same = bool(tr.blocked and was_blocked and tr.blocked.split()[:3] == was_blocked.split()[:3])
+                repeats = repeats + 1 if same else 0
+                if repeats < 3:
+                    lines.append(f"+{now[0]:6.0f}s {'BLOCKED: ' + tr.blocked if tr.blocked else 'unblocked'}"
+                                 f" (picks known {len(tr.picks)}, held {len(tr.buffer)})")
+                elif repeats == 3:
+                    lines.append("         (still blocked the same way; further lines left out)")
                 was_blocked = tr.blocked
         out += lines
         out += ["", f"end: {len(tr.picks)} picks recorded, blocked: {tr.blocked}, "
