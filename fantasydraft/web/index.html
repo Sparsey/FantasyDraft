@@ -251,6 +251,23 @@ function likelyLine(o) {
   return `<div class="likely" title="In the simulated drafts: who is the best player left (by your projections) when your pick comes">` +
     `Likely best left at #${o.pick}: ${o.likely.map((x) => `${esc(x.name)} ${pct(x.p)}`).join(" · ")}</div>`;
 }
+// Why the GAMBLE beats ESPN's pick, and so what has to be true for it to pay off.
+function gambleCondition(g) {
+  if (!g || !g.espn || g.name === g.espn) return "";
+  const n = (x) => x.toLocaleString();
+  const why = [];
+  if (g.g_proj > g.e_proj && g.g_espn <= g.e_espn) {
+    why.push(`a bet on your sources: they have <b>${esc(g.name)}</b> ${n(g.g_proj)} vs ${esc(g.espn)} ${n(g.e_proj)}, ` +
+             `ESPN the other way (${n(g.g_espn)} vs ${n(g.e_espn)}). Pays off if your sources are right`);
+  }
+  if (g.e_now != null && g.e_now < 0.6 && (g.g_now ?? 1) > g.e_now + 0.15) {
+    why.push(`timing: ${esc(g.espn)} is only ${pct(g.e_now)} likely to reach your pick, ${esc(g.name)} ${pct(g.g_now)}`);
+  }
+  if (!why.length) why.push(`roster fit: ${esc(g.name)} adds more to your lineup than ${esc(g.espn)} over the rest of the draft`);
+  const back = g.e_after != null && g.next_pick && g.e_after >= 0.2
+    ? ` · ${esc(g.espn)} ${pct(g.e_after)} likely still there at #${g.next_pick}` : "";
+  return `<div class="likely">GAMBLE vs ESPN's pick: ${why.join("; ")}${back}</div>`;
+}
 function renderAdvice(a, r) {
   const box = $("advice");
   const recs = (r && r.recs) || [];
@@ -274,7 +291,7 @@ function renderAdvice(a, r) {
     ? `<span><span class="ptag gamble" style="margin:0 4px 0 0">GAMBLE</span><b>${esc(a.gamble.name)}</b> <span class="muted">${pct(a.gamble.p_better)} chance better</span></span>` : "";
   const why = (a.reasons || []).join("\n");
   const html = `<div class="tline"${why ? ` title="${esc(why)}"` : ""}><span>Target ${where}: <b class="tgt">${esc(a.top)}</b>${there}</span>${espn}${g}</div>` +
-    likelyLine(r.outlook);
+    gambleCondition(a.gamble) + likelyLine(r.outlook);
   lastAdvice = {html, target: a.top};
   box.hidden = false; box.className = "advice"; box.innerHTML = html;
 }

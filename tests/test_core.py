@@ -1111,3 +1111,24 @@ def test_unreadable_old_picks_file_is_set_aside(tmp_path):
     picks.write_text(f"{pid}\n@auto Team 9\n")  # from an earlier 10-team mock
     tr = RoomTracker(league, players, picks, log=lambda _: None)
     assert tr.picks == [] and list(tmp_path.glob("mock4.old-*.txt"))
+
+
+def test_review_compares_with_espn_autodraft(tmp_path):
+    import json as _json
+    from dataclasses import replace as _replace
+    from fantasydraft.review import review
+
+    players = load_players(SAMPLE)
+    ids = sorted(players, key=lambda p: -players[p].proj_points)
+    # my sources like the 6th-best player much more than ESPN does
+    players[ids[5]] = _replace(players[ids[5]], espn_points=players[ids[5]].proj_points - 500)
+    lg = League([TeamProfile(f"T{i}") for i in range(4)], 0, roster_slots={"PG": 1, "C": 1, "UTIL": 1, "BE": 1})
+    picks = [ids[0], ids[1], ids[2], ids[3], ids[4], ids[6], ids[7], ids[5]]  # at #8 I took him
+    picks += [p for p in ids[8:16]]
+    st = DraftState(lg, players, picks)
+    dec = tmp_path / "d.jsonl"
+    dec.write_text(_json.dumps({"pick": 8, "took": ids[5], "target": ids[5], "espn": ids[8], "gamble": ids[5],
+                                "gamble_p_better": 0.7, "gamble_diff": 120}) + "\n")
+    text = review(st, dec)
+    assert "#  8 took" in text and "ESPN's pick" in text and "GAMBLE was" in text
+    assert "by your combined projections" in text and "by ESPN's projections" in text

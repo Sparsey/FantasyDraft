@@ -31,6 +31,18 @@ It writes `mock.json` for that room (your sheet, sources and scoring copied
 from `league.json`), starts the dashboard on a new picks file in `mocks/`,
 and opens the window. Ctrl+C when you're done.
 
+Afterwards, see how your picks compare with ESPN's board:
+
+```
+python -m fantasydraft review
+```
+
+It takes the latest mock in `mocks/` and lists, for each of your picks, what
+you took, what ESPN's board would have taken (and whether that player was
+still there at your next pick), what the dashboard suggested (target,
+GAMBLE), and your final roster against an "ESPN autodraft you", by your
+projections and by ESPN's.
+
 ## Each draft
 
 1. Create the league file (for a mock: your draft position and team count):

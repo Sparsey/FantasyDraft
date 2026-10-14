@@ -87,6 +87,10 @@ class Dashboard:
         self.done_version = -1  # last version fully computed
         self._prev_chances: tuple[int | None, dict] = (None, {})  # (my next pick, chances) last time
         self._prev: dict = {}  # chances to compare with in this round of updates
+        self._suggested: dict[int, dict] = {}  # my pick (0-based) -> what was suggested last
+        self._logged: set[int] = set()
+        picks_file = Path(picks_path)
+        self.decisions_path = picks_file.with_name(picks_file.stem + ".decisions.jsonl")
         self.computing = False
         self.predictions: list[dict] = []
         self.pred_history: dict[int, dict[str, float]] = {}  # pick -> {player: P} predicted beforehand
@@ -128,6 +132,7 @@ class Dashboard:
                 version = self.tracker.version
                 st = self.state()
                 self.computing = True
+            self._log_decisions(st)
             try:
                 # Until the new chances are in, show last pick's (same next pick of
                 # yours) so the availability lines don't vanish for a second.
@@ -158,6 +163,20 @@ class Dashboard:
             with self.lock:
                 self.computing = False
                 self.done_version = version
+
+    def _log_decisions(self, st: DraftState) -> None:
+        """Once one of my picks is made, write down what was suggested for it."""
+        lg = self.league
+        for k, pid in enumerate(st.picks):
+            if lg.team_for_pick(k) != lg.my_slot or k in self._logged or k not in self._suggested:
+                continue
+            self._logged.add(k)
+            row = {"pick": k + 1, "took": pid, **self._suggested[k]}
+            try:
+                with self.decisions_path.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(row) + "\n")
+            except OSError:
+                pass
 
     def _refresh_tendencies(self, st: DraftState, version: int) -> None:
         try:
@@ -272,9 +291,23 @@ class Dashboard:
         if advice is not None:
             g = vs.get(gamble.id) if gamble else None
             advice["safe"] = baseline.name if baseline else None
+            base_rec = next((r for r in recs if baseline and r.player.id == baseline.id), None)
             advice["gamble"] = None if g is None else {
                 "name": gamble.name, "p_better": g.p_better, "avg_up": round(g.avg_up),
-                "p_worse": g.p_worse, "avg_down": round(g.avg_down), "diff": round(g.diff)}
+                "p_worse": g.p_worse, "avg_down": round(g.avg_down), "diff": round(g.diff),
+                # what has to be true for it to pay off
+                "espn": baseline.name, "g_proj": round(gamble.proj_points), "g_espn": round(gamble.room_points),
+                "e_proj": round(baseline.proj_points), "e_espn": round(baseline.room_points),
+                "e_after": base_rec.p_avail_after if base_rec else None,
+                "e_now": base_rec.p_avail_now if base_rec else None,
+                "g_now": next((r.p_avail_now for r in recs if r.player.id == gamble.id), None),
+                "next_pick": st.my_next_picks()[1] + 1 if len(st.my_next_picks()) > 1 else None}
+            # Remember what was suggested for this pick of yours, for `review` afterwards.
+            self._suggested[st.my_next_picks()[0]] = {
+                "target": recs[0].player.id if recs else None,
+                "espn": baseline.id if baseline else None,
+                "gamble": gamble.id if gamble else None,
+                "gamble_p_better": g.p_better if g else None, "gamble_diff": round(g.diff) if g else None}
 
         def vs_fields(r):
             v = vs.get(r.player.id)
