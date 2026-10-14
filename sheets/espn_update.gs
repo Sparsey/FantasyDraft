@@ -65,6 +65,7 @@ function getSettings_() {
     espnS2: (p.espnS2 || '').trim(),
     swid: (p.swid || '').trim(),
     rankType: p.rankType || 'STANDARD',
+    ranksLeagueId: parseLeagueId_(p.ranksLeagueId),
     limit: Number(p.limit || 400)
   };
 }
@@ -77,7 +78,8 @@ function configure() {
     ['season', 'Season year — the year the season ENDS (2026-27 season = 2027)', s.season],
     ['espnS2', 'espn_s2 cookie — private leagues only, leave blank if public', s.espnS2 ? '(saved)' : ''],
     ['swid', 'SWID cookie, including { } — private leagues only', s.swid ? '(saved)' : ''],
-    ['rankType', 'ESPN rank list for espn_rank (usually STANDARD)', s.rankType],
+    ['rankType', 'ESPN rank list for espn_rank: STANDARD (default draft-room ranks) or ROTO', s.rankType],
+    ['ranksLeagueId', 'Optional "ranks league": a league whose draft room has rankings, e.g. a mock draft\'s leagueId (from its URL). Used if your own league has none yet', s.ranksLeagueId],
     ['limit', 'How many players to pull', String(s.limit)]
   ];
   var props = PropertiesService.getUserProperties();
@@ -105,9 +107,9 @@ function configure() {
   ui.alert('Saved. Run Draft Tools → Update players from ESPN when you are ready.');
 }
 
-function espnGet_(path, s, useCookies) {
+function espnGet_(path, s, useCookies, view) {
   var url = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/' + s.season + path +
-            '?view=kona_player_info';
+            '?view=' + (view || 'kona_player_info');
   var filter = {players: {limit: s.limit,
                           sortDraftRanks: {sortPriority: 100, sortAsc: true, value: s.rankType}}};
   var headers = {'X-Fantasy-Filter': JSON.stringify(filter), 'Accept': 'application/json'};
@@ -125,7 +127,8 @@ function fetchEspnPlayers_(s) {
   var resp = espnGet_('/segments/0/leagues/' + s.leagueId, s, true);
   var code = resp.getResponseCode();
   if (code === 200) {
-    return {players: JSON.parse(resp.getContentText()).players || [], source: 'league ' + s.leagueId, warning: ''};
+    return {players: JSON.parse(resp.getContentText()).players || [], source: 'league ' + s.leagueId, warning: '',
+            path: '/segments/0/leagues/' + s.leagueId, cookies: true};
   }
   var why;
   if (code === 401 || code === 403) {
@@ -145,8 +148,44 @@ function fetchEspnPlayers_(s) {
   return {
     players: JSON.parse(fallback.getContentText()).players || [],
     source: 'ESPN default scoring',
-    warning: why + ' Using ESPN default-league projections for now; run Update again once your league works.'
+    warning: why + ' Using ESPN default-league projections for now; run Update again once your league works.',
+    path: '/segments/0/leaguedefaults/1', cookies: false
   };
+}
+
+/**
+ * The draft room's own rankings come from a different view than the player
+ * info. Fetch them and copy each player's draftRanksByRankType onto the
+ * projection data. Tries the projections' league first, then the optional
+ * "ranks league" from Settings (e.g. a mock draft's leagueId). Returns a
+ * description of where ranks came from.
+ */
+function mergeDraftRanks_(rawPlayers, s, path, useCookies) {
+  var tries = [{path: path, cookies: useCookies, label: 'draft-room rankings'}];
+  if (s.ranksLeagueId) {
+    tries.push({path: '/segments/0/leagues/' + s.ranksLeagueId, cookies: true,
+                label: 'draft-room rankings from league ' + s.ranksLeagueId});
+  }
+  for (var t = 0; t < tries.length; t++) {
+    var resp = espnGet_(tries[t].path, s, tries[t].cookies, 'kona_player_info_edit_draft_strategy');
+    if (resp.getResponseCode() !== 200) continue;
+    var ranked = {};
+    var n = 0;
+    (JSON.parse(resp.getContentText()).players || []).forEach(function (raw) {
+      var info = raw.player || raw;
+      var ranks = info.draftRanksByRankType;
+      if (ranks && Object.keys(ranks).length) { ranked[String(info.id || raw.id)] = ranks; n++; }
+    });
+    if (!n) continue;
+    rawPlayers.forEach(function (raw) {
+      var info = raw.player || raw;
+      var ranks = ranked[String(info.id || raw.id)];
+      if (ranks) info.draftRanksByRankType = ranks;
+    });
+    return tries[t].label + ' (' + n + ' players)';
+  }
+  return 'player-info ranks (draft-room rankings not available' +
+         (s.ranksLeagueId ? '' : ' — set a "ranks league" in Settings, e.g. a mock draft\'s leagueId') + ')';
 }
 
 function parsePlayer_(raw, season, rankType) {
@@ -197,6 +236,7 @@ function updatePlayers_() {
     return;
   }
   var fetched = fetchEspnPlayers_(s);
+  var rankSource = mergeDraftRanks_(fetched.players, s, fetched.path, fetched.cookies);
   // Which ESPN rank lists exist, and how the chosen one compares with
   // projection order (identical order suggests it's just sorted by projections).
   var rankTypes = {};
@@ -264,7 +304,7 @@ function updatePlayers_() {
   var byRank = byProj.slice().sort(function (a, b) { return a.espn_rank - b.espn_rank; });
   var moved = 0;
   byProj.forEach(function (p, i) { if (Math.abs(byRank.indexOf(p) - i) >= 5) moved++; });
-  var rankNote = 'Rank lists ESPN provides: ' + (Object.keys(rankTypes).join(', ') || 'none') +
+  var rankNote = 'Ranks from: ' + rankSource + '\nRank lists ESPN provides: ' + (Object.keys(rankTypes).join(', ') || 'none') +
                  '\nUsing ' + s.rankType + ': ' + (byProj.length ?
                    moved + ' of the top ' + byProj.length + ' by projection are 5+ spots away from their ' + s.rankType + ' rank' +
                    (moved === 0 ? ' (same order as projections)' : '') : 'no ranks found');

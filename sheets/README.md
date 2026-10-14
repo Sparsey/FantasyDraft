@@ -38,6 +38,21 @@ stay as they are.
 You can enter the league id, season and cookies now. Use the same league id
 as last season, because ESPN keeps it when a league is renewed.
 
+## Draft-room rankings
+
+ESPN's draft room loads its rankings from a separate request
+(`kona_player_info_edit_draft_strategy`) with two lists: **STANDARD** (the
+default draft-room ranks) and **ROTO**. The update fetches that request and
+uses its ranks for `espn_rank`. The pop-up and header note say where the
+ranks came from.
+
+Before your league is activated, that request may have no ranks. In that
+case, put a mock draft's league id in Settings → "ranks league". It's in
+the mock draft room's URL (`leagueId=...`), and its rankings get used
+instead. `python -m fantasydraft capture-ranks <capture.jsonl> --league
+league.json` reads the same rankings out of a draft-room capture and
+compares them with your sheet.
+
 ## The players tab
 
 The script uses the tab named `players`, or the first tab if there isn't one.

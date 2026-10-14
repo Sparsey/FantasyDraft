@@ -478,3 +478,18 @@ def test_rank_vs_projection_detects_identical_order():
     order = sorted(players.values(), key=lambda p: -p.proj_points)
     same = {p.id: dataclasses.replace(p, espn_rank=float(i + 1)) for i, p in enumerate(order)}
     assert "IDENTICAL" in rank_vs_projection(same)
+
+
+def test_draft_room_ranks_from_capture_and_merge():
+    import json as _json
+    from fantasydraft.espn import draft_ranks_from_capture, merge_draft_ranks, parse_player
+
+    body = {"players": [{"id": 7, "player": {"id": 7, "fullName": "A B",
+                                             "draftRanksByRankType": {"STANDARD": {"rank": 4}, "ROTO": {"rank": 9}}}}]}
+    events = [{"kind": "xhr", "url": "x?view=kona_player_info_edit_draft_strategy", "data": _json.dumps(body)},
+              {"kind": "ws-in", "data": "CLOCK 1 2 3"}]
+    assert draft_ranks_from_capture(events) == {"7": {"name": "A B", "STANDARD": 4, "ROTO": 9}}
+
+    info = [{"id": 7, "player": {"id": 7, "fullName": "A B", "eligibleSlots": [0], "draftRanksByRankType": {}}}]
+    assert merge_draft_ranks(info, body["players"]) == 1
+    assert parse_player(info[0], 2027).espn_rank == 4.0

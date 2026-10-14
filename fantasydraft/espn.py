@@ -33,7 +33,9 @@ NBA_TEAMS = {
     22: "POR", 23: "SAC", 24: "SAS", 25: "OKC", 26: "UTA", 27: "WAS", 28: "TOR",
     29: "MEM", 30: "CHA",
 }
-PROJECTED = 1  # statSourceId
+PROJECTED = 1
+# View the ESPN draft room uses to load its player rankings (STANDARD, ROTO).
+DRAFT_RANKS_VIEW = "kona_player_info_edit_draft_strategy"  # statSourceId
 SEASON_SPLIT = 0  # statSplitTypeId
 
 
@@ -121,8 +123,14 @@ class EspnClient:
             }
         }
         path = "/segments/0/leaguedefaults/1" if defaults else self._league_path
-        data = self._get(path, ["kona_player_info"], flt)
-        return data.get("players", [])
+        players = self._get(path, ["kona_player_info"], flt).get("players", [])
+        # The draft room's rankings come from a separate view; copy them over.
+        try:
+            ranked = self._get(path, [DRAFT_RANKS_VIEW], flt).get("players", [])
+        except Exception:
+            ranked = []
+        merge_draft_ranks(players, ranked)
+        return players
 
     def players(self, limit: int = 400, rank_type: str = "STANDARD", defaults: bool = False) -> list[Player]:
         raw = self.players_raw(limit, rank_type, defaults)
@@ -156,3 +164,39 @@ def parse_player(raw: dict, season: int, rank_type: str = "STANDARD") -> Player 
         adp=float(adp) if adp else float("inf"),
         nba_team=NBA_TEAMS.get(info.get("proTeamId"), str(info.get("proTeamId", ""))),
     )
+
+
+def merge_draft_ranks(players: list[dict], ranked: list[dict]) -> int:
+    """Copy draftRanksByRankType from draft-room data onto player-info data (by id)."""
+    by_id = {}
+    for raw in ranked:
+        info = raw.get("player", raw)
+        if info.get("draftRanksByRankType"):
+            by_id[str(info.get("id", raw.get("id")))] = info["draftRanksByRankType"]
+    for raw in players:
+        info = raw.get("player", raw)
+        ranks = by_id.get(str(info.get("id", raw.get("id"))))
+        if ranks:
+            info["draftRanksByRankType"] = ranks
+    return len(by_id)
+
+
+def draft_ranks_from_capture(events: list[dict]) -> dict[str, dict]:
+    """Draft-room rankings found in a userscript capture: id -> {name, STANDARD, ROTO, ...}."""
+    out: dict[str, dict] = {}
+    for e in events:
+        if e.get("kind") not in ("fetch", "xhr") or "draftRanksByRankType" not in str(e.get("data", "")):
+            continue
+        try:
+            body = json.loads(e["data"])
+        except (ValueError, TypeError):
+            continue
+        for raw in body.get("players", []) if isinstance(body, dict) else []:
+            info = raw.get("player", raw)
+            ranks = info.get("draftRanksByRankType") or {}
+            if ranks:
+                row = out.setdefault(str(info.get("id", raw.get("id"))), {"name": info.get("fullName", "?")})
+                for kind, r in ranks.items():
+                    if isinstance(r, dict) and r.get("rank"):
+                        row[kind] = r["rank"]
+    return out

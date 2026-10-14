@@ -483,6 +483,40 @@ def cmd_room(args) -> None:
     serve(args.out, args.port, on_event=on_event, quiet=True)
 
 
+def cmd_capture_ranks(args) -> None:
+    """Pull the draft room's rankings out of a capture and compare with projections."""
+    import csv as _csv
+    import dataclasses
+
+    from .benchmark import rank_vs_projection
+    from .espn import draft_ranks_from_capture
+    from .io import load_players, players_source
+
+    events = [json.loads(line) for line in Path(args.capture).read_text(encoding="utf-8").splitlines() if line.strip()]
+    ranks = draft_ranks_from_capture(events)
+    if not ranks:
+        sys.exit("no draft-room rankings found in this capture")
+    kinds = sorted({k for r in ranks.values() for k in r if k != "name"})
+    with open(args.out, "w", newline="", encoding="utf-8") as f:
+        w = _csv.writer(f)
+        w.writerow(["id", "name", *kinds])
+        for pid, r in sorted(ranks.items(), key=lambda kv: kv[1].get(kinds[0], 1e9)):
+            w.writerow([pid, r["name"], *(r.get(k, "") for k in kinds)])
+    print(f"{len(ranks)} players with draft-room ranks ({', '.join(kinds)}) -> {args.out}")
+    if args.league or args.players:
+        players = load_players(args.players or players_source(args.league))
+        matched = [p for p in players.values() if p.id in ranks]
+        print(f"{len(matched)} of them are in your players list")
+        for kind in kinds:
+            with_room = {p.id: dataclasses.replace(p, espn_rank=float(ranks[p.id].get(kind, float("inf"))))
+                         for p in matched}
+            print(f"  {kind}: " + rank_vs_projection(with_room))
+        top = sorted(matched, key=lambda p: ranks[p.id].get(kinds[0], 1e9))[:10]
+        print(f"\nTop 10 by draft-room {kinds[0]} rank vs your sheet:")
+        for p in top:
+            print(f"  room #{ranks[p.id].get(kinds[0])}  sheet espn_rank {p.espn_rank:g}  proj {p.proj_points:.0f}  {p.name}")
+
+
 def cmd_benchmark(args) -> None:
     from .benchmark import benchmark, summarize
     from .io import load_players
@@ -615,6 +649,13 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--out", default="capture.jsonl", help="raw event log (for troubleshooting)")
     p.add_argument("--port", type=int, default=8765)
     p.set_defaults(func=cmd_room)
+
+    p = sub.add_parser("capture-ranks", help="extract the draft room's player rankings from a capture file")
+    p.add_argument("capture", help="capture .jsonl recorded while a draft room was open")
+    p.add_argument("--out", default="draft_room_ranks.csv")
+    p.add_argument("--league", help="league file, to compare with your players list")
+    p.add_argument("--players", help="players CSV or sheet link, to compare")
+    p.set_defaults(func=cmd_capture_ranks)
 
     p = sub.add_parser("benchmark", help="simulated drafts: how much each pick policy gains over autodraft")
     p.add_argument("--players", help="players CSV or sheet link (default: sample data)")
