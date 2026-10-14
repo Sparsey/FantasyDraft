@@ -133,6 +133,7 @@ def load_league(path: str | Path) -> League:
         bench_weight=float(cfg.get("bench_weight", 0.4)),
         position_targets=cfg.get("position_targets"),
         balance_penalty=float(cfg.get("balance_penalty", 0.2)),
+        learn_noise=bool(cfg.get("learn_noise", True)),
     )
 
 

@@ -24,6 +24,7 @@ from pathlib import Path
 
 from .analyze import analyze
 from .io import apply_log, is_placeholder, load_state
+from .learn import fit_teams
 from .lineup import assign_lineup, target_fill
 from .models import DraftState, Player, TeamProfile
 from .recommend import recommend
@@ -174,13 +175,24 @@ class Dashboard:
         """What each team's own (non-autodraft) picks so far suggest; cached per draft version."""
         version = self.tracker.version
         if self._tendencies[0] != version:
+            fits = fit_teams(st) if st.picks else {}
             rows = []
-            for t in analyze(st):
-                rows.append(None if t.picks == 0 else {
+            for i, t in enumerate(analyze(st)):
+                f = fits.get(i)
+                if t.picks == 0:
+                    rows.append(None)
+                    continue
+                best = max(f.fit, key=f.fit.get) if f else None
+                # A team that always takes the top ESPN rank looks like autodraft.
+                suggested = "auto" if t.picks >= 3 and t.top_rank_rate >= 0.9 else \
+                    best if f and f.fit[best] >= 0.6 else None
+                rows.append({
                     "picks": t.picks, "auto_picks": t.auto_picks,
-                    "top_rank": round(t.top_rank_rate, 2), "top_proj": round(t.top_points_rate, 2),
-                    "vs_adp": round(t.reach_vs_adp, 1), "vs_rank": round(t.reach_vs_rank, 1),
-                    "suggested": t.suggested,
+                    "top_rank": round(t.top_rank_rate, 2), "vs_adp": round(t.reach_vs_adp, 1),
+                    "fit": {k: round(v, 2) for k, v in f.fit.items()} if f else None,
+                    "best": best, "best_p": round(f.fit[best], 2) if f else None,
+                    "noise": f.noise if f else None, "prior_noise": f.prior_noise if f else None,
+                    "suggested": suggested,
                 })
             self._tendencies = (version, rows)
         return self._tendencies[1]

@@ -24,6 +24,12 @@ class SimResult:
 class Simulator:
     def __init__(self, state: DraftState):
         self.state = state
+        # Opponents' noise learned from their picks so far (league setting learn_noise).
+        self.learned = {}
+        if state.league.learn_noise and state.picks:
+            from .learn import learned_profiles
+
+            self.learned = learned_profiles(state)
         self.league = state.league
         self.slots = self.league.starting_slots
         strategies = {t.strategy for t in self.league.teams} | {"points", "auto"}
@@ -41,6 +47,13 @@ class Simulator:
             if len(out) == n:
                 break
         return out
+
+    def profile(self, team: int):
+        """The model used for an opponent: auto while on autodraft, else saved
+        strategy with learned noise."""
+        if team in self.state.auto_teams:
+            return self.state.profile(team)
+        return self.learned.get(team, self.state.profile(team))
 
     def _pool(self, strategy: str, taken: set[str], starts: dict[str, int]) -> tuple[list[Player], list[float]]:
         """First CANDIDATE_POOL untaken players (and their keys) for a strategy.
@@ -108,7 +121,7 @@ class Simulator:
                 forced = None
                 my_roster.append(choice)
             else:
-                profile = self.state.profile(team)
+                profile = self.profile(team)
                 pool, keys = self._pool(profile.strategy, taken, starts)
                 choice = choose_pick(profile, pool, rng, pick, keys)
                 taken_at[choice.id] = pick

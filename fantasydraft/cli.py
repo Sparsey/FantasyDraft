@@ -167,16 +167,23 @@ def cmd_import_picks(args) -> None:
 
 
 def cmd_analyze(args) -> None:
+    from .learn import fit_teams
+
     state = _state(args)
-    rows = [
-        [t.team, t.picks, t.auto_picks or "", f"{t.top_rank_rate:.0%}", f"{t.top_points_rate:.0%}",
-         f"{t.reach_vs_adp:+.1f}", f"{t.reach_vs_rank:+.1f}", t.suggested]
-        for t in analyze(state)
-    ]
-    print(_table(rows, ["team", "own picks", "auto picks", "took top ESPN rank", "took top proj",
-                        "ADP - pick", "rank - pick", "suggested strategy"]))
+    fits = fit_teams(state) if state.picks else {}
+    rows = []
+    for i, t in enumerate(analyze(state)):
+        f = fits.get(i)
+        best = max(f.fit, key=f.fit.get) if f else None
+        rows.append([t.team, t.picks, t.auto_picks or "", f"{t.top_rank_rate:.0%}",
+                     f"{t.reach_vs_adp:+.1f}",
+                     f"{best} {f.fit[best]:.0%}" if f else "",
+                     f"{f.prior_noise:g} -> {f.noise:.2f}" if f else ""])
+    print(_table(rows, ["team", "own picks", "auto picks", "took top ESPN rank", "ADP - pick",
+                        "best-fitting strategy", "noise (league file -> learned)"]))
     print("\n'ADP - pick' > 0 means the team takes players earlier than ADP (reaches).")
     print("Picks made while a team was marked @auto are left out of its stats.")
+    print("Learned noise is what the simulations use (turn off with \"learn_noise\": false).")
 
 
 DRAFT_HELP = """Record the next pick by typing the player's ESPN rank (e.g. 17),

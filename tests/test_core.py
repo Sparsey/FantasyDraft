@@ -379,3 +379,41 @@ def test_balance_targets_discount_extra_centers():
 
     no_balance = League([TeamProfile("a"), TeamProfile("b")], 0, balance_penalty=0.0)
     assert team_value(roster + [c4], no_balance) - team_value(roster, no_balance) == pytest.approx(1700)
+
+
+def _simulated_draft(true_profiles, picks, seed=3):
+    players = load_players(SAMPLE)
+    lg = League(true_profiles, len(true_profiles) - 1)
+    st = DraftState(lg, players)
+    sim = Simulator(st)
+    rng = random.Random(seed)
+    taken: set[str] = set()
+    for pick in range(picks):
+        prof = true_profiles[lg.team_for_pick(pick)]
+        c = choose_pick(prof, sim.top_untaken(prof.strategy, taken, 30), rng, pick)
+        st.picks.append(c.id)
+        taken.add(c.id)
+    return players, st.picks
+
+
+def test_learning_noise_and_strategy_from_picks():
+    from fantasydraft.learn import fit_teams
+
+    true = [TeamProfile("strict", "adp", 0.0), TeamProfile("loose rank", "rank", 0.4)] + \
+        [TeamProfile(f"t{i}", "adp", 0.15) for i in range(8)]
+    players, picks = _simulated_draft(true, 80)
+    guess = League([TeamProfile(t.name, "adp", 0.2) for t in true], 9)
+    fits = fit_teams(DraftState(guess, players, picks))
+    assert fits[0].noise < 0.08  # always took the top of the ADP list
+    assert fits[1].fit["rank"] > 0.8  # recognised as following ESPN rank
+    assert 9 not in fits  # my own team is never fitted
+
+
+def test_simulator_uses_learned_noise():
+    true = [TeamProfile("strict", "adp", 0.0)] + [TeamProfile(f"t{i}", "adp", 0.15) for i in range(9)]
+    players, picks = _simulated_draft(true, 40)
+    guess = League([TeamProfile(t.name, "adp", 0.2) for t in true], 9)
+    sim = Simulator(DraftState(guess, players, picks))
+    assert sim.profile(0).noise < 0.12  # 4 picks, all top of the list: well below the 0.2 guess
+    off = League([TeamProfile(t.name, "adp", 0.2) for t in true], 9, learn_noise=False)
+    assert Simulator(DraftState(off, players, picks)).profile(0).noise == 0.2

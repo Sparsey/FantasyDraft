@@ -85,6 +85,8 @@ class League:
     # None = an even split, rounded up (3 each for a 13-player roster).
     position_targets: dict[str, int] | None = None
     balance_penalty: float = 0.2
+    # Learn each opponent's randomness from their own picks (fantasydraft.learn).
+    learn_noise: bool = True
 
     def __post_init__(self) -> None:
         for slot in self.roster_slots:

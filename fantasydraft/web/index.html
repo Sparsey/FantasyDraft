@@ -287,12 +287,13 @@ function renderTeams() {
   $("teams").innerHTML = S.teams.map((t) => {
     const o = t.observed;
     const opts = Object.keys(STRATS).map((k) => `<option value="${k}" ${k === t.strategy ? "selected" : ""} title="${STRATS[k]}">${k}</option>`).join("");
+    const learned = o && o.noise != null && !t.me && t.strategy !== "auto";
     const obs = !o ? "" : `<div class="obs">
         <span title="Picks this team made itself (autodraft picks excluded)">${o.picks} own pick${o.picks === 1 ? "" : "s"}</span>
-        <span title="Share of their picks that were the top ESPN-ranked player left">top rank <b>${Math.round(o.top_rank * 100)}%</b></span>
+        ${o.best ? `<span title="How well each strategy explains their picks: ${Object.entries(o.fit).map(([k, v]) => k + " " + Math.round(v * 100) + "%").join(", ")}">fits <b>${o.best} ${Math.round(o.best_p * 100)}%</b></span>` : ""}
+        ${learned ? `<span title="Randomness learned from their picks (started at ${o.prior_noise}). Lower = more predictable. Used in the simulations.">noise <b>${o.prior_noise}→${o.noise.toFixed(2)}</b></span>` : ""}
         <span title="Average (ADP − pick number). Positive = takes players earlier than ADP">vs ADP <b>${signed(o.vs_adp)}</b></span>
-        ${o.suggested !== "?" ? `<span>looks like <b>${o.suggested}</b></span>` : ""}
-        ${o.suggested !== "?" && o.suggested !== t.strategy && !t.me ? `<button class="use" data-slot="${t.slot}" data-strategy="${o.suggested}" title="Model this team as '${o.suggested}'">use</button>` : ""}
+        ${o.suggested && o.suggested !== t.strategy && !t.me ? `<button class="use" data-slot="${t.slot}" data-strategy="${o.suggested}" title="Model this team as '${o.suggested}'">use ${o.suggested}</button>` : ""}
       </div>`;
     return `<div class="team${t.me ? " me" : ""}${st.on_clock && st.on_clock.slot === t.slot ? " onclock" : ""}">
       <div class="trow"><span class="n">${t.slot + 1}</span><span class="nm" title="${esc(t.name)}">${esc(t.name)}${t.me ? " (you)" : ""}</span>
