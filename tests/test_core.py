@@ -790,17 +790,21 @@ def test_safe_baseline_is_espns_top_projection():
     assert base.name == "espn top" and vs["consensus top"].diff == 200
 
 
-def test_gamble_needs_a_real_edge():
+def test_gamble_is_only_ever_the_target():
     from fantasydraft.recommend import VsBaseline, pick_gamble
 
     def R(name):
         return Recommendation(Player(name, name, frozenset({"PG"}), 1000.0), 0, 1, 0, 0)
-    recs = [R("base"), R("edge"), R("bad"), R("tie")]
-    vs = {"base": VsBaseline(0, 0, 0, 0, 0), "edge": VsBaseline(+80, 0.62, 250, 0.38, -190),
-          "bad": VsBaseline(-300, 0.10, 50, 0.90, -340), "tie": VsBaseline(+10, 0.51, 200, 0.49, -190)}
-    assert pick_gamble(recs, vs, recs[0].player).name == "edge"
-    vs["edge"] = VsBaseline(+80, 0.45, 300, 0.55, -100)  # better on average, but worse more often than not
-    assert pick_gamble(recs, vs, recs[0].player) is None  # and "tie" is too small to be worth it
+    espn, target, other = R("espn"), R("target"), R("other")
+    vs = {"espn": VsBaseline(0, 0, 0, 0, 0), "target": VsBaseline(+80, 0.62, 250, 0.38, -190),
+          "other": VsBaseline(+60, 0.70, 200, 0.30, -100)}
+    assert pick_gamble([target, other, espn], vs, espn.player).name == "target"
+    # a different player is never tagged, even if he beats ESPN's pick
+    assert pick_gamble([espn, other, target], vs, espn.player) is None
+    vs["target"] = VsBaseline(+80, 0.45, 300, 0.55, -100)  # better on average, worse more often than not
+    assert pick_gamble([target, other, espn], vs, espn.player) is None
+    vs["target"] = VsBaseline(+10, 0.55, 100, 0.45, -90)  # too small to be worth it
+    assert pick_gamble([target, other, espn], vs, espn.player) is None
 
 
 def test_auto_in_league_file_is_the_autodraft_switch(tmp_path):
@@ -1169,3 +1173,19 @@ def test_espn_counts_double_in_the_consensus(tmp_path):
     doubled, src = run()
     equal, _ = run(espn_weight=1)
     assert doubled == pytest.approx((2 * 2000 + src) / 3) and equal == pytest.approx((2000 + src) / 2)
+
+
+def test_take_the_player_who_wont_last_and_wait_on_the_one_who_will():
+    from fantasydraft.recommend import pick_gamble, versus_highest_projection
+
+    pl = [P("F", "SF", 1000, rank=1), P("G", "SF", 990, rank=90)] + \
+        [P(f"x{i}", "PF", 500 - i, rank=2 + i) for i in range(20)]
+    players = {p.id: p for p in pl}
+    lg = League([TeamProfile("me", "adp"), TeamProfile("a", "auto"), TeamProfile("b", "auto")], 0,
+                roster_slots={"SF": 1, "UTIL": 1, "BE": 2}, balance_penalty=0, cover_rate=0)
+    st = DraftState(lg, players)  # I'm on the clock; my next pick comes after the two autodrafters
+    st.auto_teams = {1, 2}
+    recs = recommend(st, candidates=4, sims=20)
+    assert recs[0].player.name == "F"  # G will still be there next time; F won't
+    base, vs = versus_highest_projection(recs)
+    assert pick_gamble(recs, vs, base) is None or pick_gamble(recs, vs, base).name == "F"
