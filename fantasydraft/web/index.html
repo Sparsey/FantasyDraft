@@ -118,6 +118,11 @@
   td.up { color: var(--good); font-weight: 600; } td.dn { color: var(--bad); }
   .ptag { font-size: 10px; font-weight: 800; letter-spacing: .04em; border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
   .ptag.safe { color: var(--good); background: var(--good-soft); border: 1px solid var(--good); }
+  .ptag.tgt { color: var(--good); background: var(--good-soft); border: 1px solid var(--good); }
+  .ptag.flr { color: var(--accent); background: var(--panel); border: 1px dashed var(--accent); }
+  tr.floor td { background: var(--accent-soft); }
+  tr.floor td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  tr.top.floor td { background: var(--good-soft); }
   .ptag.fall { color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent); }
   .chg { font-size: 10.5px; font-weight: 700; margin-right: 4px; font-variant-numeric: tabular-nums; }
   .chg.up { color: var(--good); } .chg.dn { color: var(--bad); }
@@ -239,64 +244,25 @@ const projCells = (x) => {
   return `<td class="num muted">${x.espn != null ? x.espn.toLocaleString() : "–"}</td>
     <td class="num"><b>${x.proj.toLocaleString()}</b></td><td class="num" title="${esc(t)}">${pill}</td>`;
 };
-// The summary line: the target (top of the list), ESPN's pick if different,
-// a GAMBLE if there is one, and who is likely best left at your pick. While a
-// new comparison is worked out, the last summary stays up (faded) instead of
-// being replaced by progress text.
-let lastAdvice = {html: "", target: null};
-function likelyLine(o) {
-  if (!o || !o.likely.length) return "";
-  return `<div class="likely" title="In the simulated drafts: who is the best player left (by your projections) when your pick comes">` +
-    `Likely best left at #${o.pick}: ${o.likely.map((x) => `${esc(x.name)} ${pct(x.p)}`).join(" · ")}</div>`;
-}
-// Why the GAMBLE beats ESPN's pick, and so what has to be true for it to pay off.
-function gambleCondition(g) {
+function gambleWhy(g) {
   if (!g || !g.espn || g.name === g.espn) return "";
   const n = (x) => x.toLocaleString();
   const why = [];
-  if (g.g_proj > g.e_proj && g.g_espn <= g.e_espn) {
-    why.push(`a bet on your sources: they have <b>${esc(g.name)}</b> ${n(g.g_proj)} vs ${esc(g.espn)} ${n(g.e_proj)}, ` +
-             `ESPN the other way (${n(g.g_espn)} vs ${n(g.e_espn)}). Pays off if your sources are right`);
-  }
-  if (g.e_now != null && g.e_now < 0.6 && (g.g_now ?? 1) > g.e_now + 0.15) {
-    why.push(`timing: ${esc(g.espn)} is only ${pct(g.e_now)} likely to reach your pick, ${esc(g.name)} ${pct(g.g_now)}`);
-  }
-  if (!why.length) why.push(`roster fit: ${esc(g.name)} adds more to your lineup than ${esc(g.espn)} over the rest of the draft`);
-  const back = g.e_after != null && g.next_pick && g.e_after >= 0.2
-    ? ` · ${esc(g.espn)} ${pct(g.e_after)} likely still there at #${g.next_pick}` : "";
-  return `<div class="likely">GAMBLE vs ESPN's pick: ${why.join("; ")}${back}</div>`;
+  if (g.g_proj > g.e_proj && g.g_espn <= g.e_espn)
+    why.push(`A bet on your sources: they have ${g.name} ${n(g.g_proj)} vs ${g.espn} ${n(g.e_proj)}, ESPN the other way ` +
+             `(${n(g.g_espn)} vs ${n(g.e_espn)}). Pays off if your sources are right.`);
+  if (g.e_now != null && g.e_now < 0.6 && (g.g_now ?? 1) > g.e_now + 0.15)
+    why.push(`Timing: ${g.espn} (ESPN's pick) is only ${pct(g.e_now)} likely to reach your pick, ${g.name} ${pct(g.g_now)}.`);
+  if (!why.length) why.push(`Roster fit: ${g.name} adds more to your lineup than ${g.espn} over the rest of the draft.`);
+  if (g.e_after != null && g.next_pick && g.e_after >= 0.2) why.push(`${g.espn} is ${pct(g.e_after)} likely still there at #${g.next_pick}.`);
+  return `Ends better than ESPN's pick in ${pct(g.p_better)} of simulated drafts (${g.diff >= 0 ? "+" : ""}${g.diff} on average).\n` + why.join("\n");
 }
-function renderAdvice(a, r) {
-  const box = $("advice");
-  const recs = (r && r.recs) || [];
-  const working = r && r.stage && r.stage !== "full";
-  if (!a) {
-    if (working && recs.length) {
-      const still = lastAdvice.target && recs.some((x) => x.name === lastAdvice.target);
-      box.hidden = false; box.className = "advice updating";
-      box.innerHTML = still ? lastAdvice.html : (likelyLine(r.outlook) || "Working out your target…");
-      return;
-    }
-    box.hidden = true; return;
-  }
-  const where = a.away ? `at #${a.pick}` : "now";
-  const there = a.away ? ` <span class="muted">${pct(a.top_p)} there</span>` : "";
-  const espn = a.kind === "same"
-    ? `<span class="muted">same as ESPN's pick</span>`
-    : `<span>ESPN would take <b>${esc(a.best)}</b>${a.away ? ` <span class="muted">${pct(a.best_p)} there</span>` : ""}` +
-      `${a.gain > 0 ? ` <span class="muted">(target +${a.gain})</span>` : ""}</span>`;
-  const g = a.gamble && a.gamble.name !== a.top
-    ? `<span><span class="ptag gamble" style="margin:0 4px 0 0">GAMBLE</span><b>${esc(a.gamble.name)}</b> <span class="muted">${pct(a.gamble.p_better)} chance better</span></span>` : "";
-  const why = (a.reasons || []).join("\n");
-  const html = `<div class="tline"${why ? ` title="${esc(why)}"` : ""}><span>Target ${where}: <b class="tgt">${esc(a.top)}</b>${there}</span>${espn}${g}</div>` +
-    gambleCondition(a.gamble) + likelyLine(r.outlook);
-  lastAdvice = {html, target: a.top};
-  box.hidden = false; box.className = "advice"; box.innerHTML = html;
-}
-function tagTxt(x) {
+function tagTxt(x, r) {
   let t = "";
+  if (x.is_target) t += `<span class="ptag tgt" title="The pick to aim for: best final roster on average, weighing how good he is against his chance of being there">TARGET</span>`;
+  if (x.is_floor) t += `<span class="ptag flr" title="Your floor: even if every pick before yours took your favourite players, he is still there">FLOOR</span>`;
   if (x.tag === "safe") t += `<span class="ptag safe" title="ESPN's pick: its top projection among players you can realistically get (what ESPN's board and autodraft go by)">ESPN</span>`;
-  if (x.tag === "gamble") t += `<span class="ptag gamble" title="Ends with a better final roster than ESPN's pick in at least 40% of simulated drafts">GAMBLE</span>`;
+  if (x.tag === "gamble") t += `<span class="ptag gamble" title="${esc(gambleWhy(r && r.advice && r.advice.gamble) || "Ends with a better final roster than ESPN's pick in at least 40% of simulated drafts")}">GAMBLE</span>`;
   if (x.falling) t += `<span class="ptag fall" title="ESPN ranks him well before your pick, but he has a real chance of lasting to you">FALLING</span>`;
   return t;
 }
@@ -403,7 +369,7 @@ function render() {
   $("tablebody").style.opacity = r.stale ? "0.55" : "";
   const tkey = JSON.stringify([tab, r, manual(), S.status.my_picks]);
   if (tkey !== tableKey) { tableKey = tkey; renderTable(r); }
-  renderAdvice(r.advice, r);
+  $("advice").hidden = true;  // the table's tags carry the advice now
 
   // Re-render the slower-changing panels only when their data changed (keeps selects/scroll stable).
   const key = JSON.stringify([S.version, S.teams, S.positions, S.strip.accuracy]);
@@ -514,8 +480,8 @@ function renderTable(r) {
       <th class="num" title="Chance the player lasts to the pick after that, if you pass">Lasts</th>
       <th class="num" title="Final roster value (by your combined numbers) compared with taking ESPN's pick, averaged over simulated drafts. Hover a value for how often it ends better or worse">vs ESPN pick</th>
       ${manual() ? "<th></th>" : ""}</tr></thead><tbody>` +
-      r.recs.map((x, i) => availLine(r, i, cols) + `<tr class="${x.is_target ? "top" : ""}" ${x.value != null ? `title="Final roster value ${x.value.toLocaleString()}"` : ""}>
-        <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span>${tagTxt(x)}</td>
+      r.recs.map((x, i) => availLine(r, i, cols) + `<tr class="${x.is_target ? "top" : ""}${x.is_floor ? " floor" : ""}" ${x.value != null ? `title="Final roster value ${x.value.toLocaleString()}"` : ""}>
+        <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span>${tagTxt(x, r)}</td>
         ${r.has_sources ? projCells(x) : `<td class="num">${x.proj.toLocaleString()}</td>`}
         <td class="num">${changeTxt(x)}${bar(x.p_now)}</td><td class="num">${bar(x.p_after)}</td>
         ${x.is_baseline ? `<td class="num muted">ESPN pick</td>`

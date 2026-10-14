@@ -229,17 +229,27 @@ class Dashboard:
         avail = [p for p in st.available() if not is_placeholder(p)]
         if probs is not None and not on_clock:  # same cut as the recommendations
             avail = [p for p in avail if (probs.get(p.id) or [0])[0] >= MIN_AVAIL] or avail
-        shown = sorted(avail, key=lambda p: p.proj_points, reverse=True)[:self.BOARD_SIZE]
+        before_me = st.my_next_picks()[0] - st.current_pick
+        shown = sorted(avail, key=lambda p: p.proj_points, reverse=True)[:max(self.BOARD_SIZE, before_me + 3)]
         espn_top = max(avail, key=lambda p: (p.room_points, p.proj_points), default=None)
         if espn_top is not None and espn_top not in shown:
             shown.append(espn_top)
             shown.sort(key=lambda p: -p.proj_points)  # in its place on the board, not at the end
         return shown, espn_top
 
+    @staticmethod
+    def _floor(st: DraftState) -> str | None:
+        """The guaranteed minimum: with N picks before yours, whatever those
+        teams take, your (N+1)-th best available player is still there."""
+        before_me = st.my_next_picks()[0] - st.current_pick
+        ranked = sorted((p for p in st.available() if not is_placeholder(p)),
+                        key=lambda p: p.proj_points, reverse=True)
+        return ranked[before_me].id if before_me < len(ranked) else None
+
     def _board_row(self, st: DraftState, p: Player, probs: dict | None) -> dict:
         on_clock = st.my_next_picks()[0] == st.current_pick
         pr = (probs or {}).get(p.id, [])
-        return {**self._player_fields(p), **self._trend(st, p, probs),
+        return {**self._player_fields(p), **self._trend(st, p, probs), "is_floor": p.id == self._floor(st),
                 "p_now": 1.0 if on_clock else (pr[0] if pr else None) if probs is not None else None,
                 "p_after": (pr[1] if len(pr) > 1 else 0.0) if probs is not None else None}
 
@@ -323,12 +333,13 @@ class Dashboard:
                     "p_better": v.p_better, "avg_up": round(v.avg_up), "p_worse": v.p_worse,
                     "avg_down": round(v.avg_down)}
 
+        floor = self._floor(st)
         rows = [{
             **self._player_fields(r.player), **self._trend(st, r.player, probs),
             "p_now": r.p_avail_now, "p_after": r.p_avail_after,
             "value": round(r.exp_final_value),
             **vs_fields(r),
-            "is_target": i == 0,
+            "is_target": i == 0, "is_floor": r.player.id == floor,
             "tag": "safe" if baseline and r.player.id == baseline.id
                    else "gamble" if gamble and r.player.id == gamble.id else None,
         } for i, r in enumerate(recs)]
