@@ -1047,3 +1047,23 @@ def test_likely_best_left_at_my_pick():
     best = max(likely, key=likely.get)
     assert probs[best][0] > 0  # the likely best-left player really is often there
     assert all(probs[pid][0] > 0 for pid in likely)
+
+
+def test_old_picks_file_is_set_aside_for_a_new_draft(tmp_path):
+    from fantasydraft.room import RoomTracker
+
+    players = load_players(SAMPLE)
+    ids = sorted(players, key=lambda p: players[p].espn_rank)
+    league = League([TeamProfile(f"T{i}") for i in range(10)], 0)
+    picks = tmp_path / "mock2.txt"
+    picks.write_text("".join(f"{ids[k]}\n" for k in range(130)))
+    tr = RoomTracker(league, players, picks, log=lambda _: None)
+    assert len(tr.picks) == 130
+    tr.handle_message("SELECTING 4 60000")  # held: an unmapped team after a "restart"
+    tr.handle_message(f"SELECTED 4 {ids[5]} 1 m")
+    tr.handle_page_text("ON THE CLOCK: PICK 2")
+    assert tr.picks == [ids[5]] and not tr.blocked  # the held pick counts in the new draft
+    assert list(tmp_path.glob("mock2.old-*.txt"))  # the old draft is kept, not deleted
+    tr.handle_message("SELECTING 5 60000")
+    tr.handle_message(f"SELECTED 5 {ids[0]} 1 m")
+    assert tr.picks == [ids[5], ids[0]]

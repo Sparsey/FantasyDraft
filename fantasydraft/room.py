@@ -215,6 +215,22 @@ class RoomTracker:
         self.log(f"   {self.name(slot)} {'is ON autodraft' if on else 'is back from autodraft'}")
         return True
 
+    def _start_fresh(self, why: str) -> None:
+        backup = self.path.with_name(f"{self.path.stem}.old-{time.strftime('%Y%m%d-%H%M%S')}{self.path.suffix}")
+        try:
+            self.path.replace(backup)
+            self.map_path.unlink(missing_ok=True)
+            kept = f"; the old picks are saved as {backup.name}"
+        except OSError:
+            kept = ""
+        self.log(f"!! Starting fresh: {why}{kept}.")
+        pending = self.buffer  # messages held meanwhile belong to the new draft
+        self.entries, self.buffer, self.blocked = [], [], None
+        self.team_slot, self.pending_auto = {}, {}
+        self.resumed, self.team_count, self.last_team = False, None, None
+        self._save()
+        self._replay(pending)
+
     def _team_count_text(self) -> str:
         c = self.team_count
         return "?" if c is None else str(c) if c > 0 else f"at least {-c}"
@@ -341,6 +357,10 @@ class RoomTracker:
             return
         done = int(m.group(1)) - 1
         self.page_done = done
+        if done < len(self.picks):
+            # Picks can't un-happen: the file is from an earlier draft.
+            self._start_fresh(f"the draft page is at pick {done + 1} but {self.path.name} already has "
+                              f"{len(self.picks)} picks (from an earlier draft)")
         if len(self.picks) >= done and not self.blocked:
             return
         if self.blocked and len(self.picks) + sum(m.startswith("SELECTED") for m in self.buffer) >= done:
