@@ -76,19 +76,23 @@ def draft_scores(state: DraftState) -> list[dict]:
     that pick number is normally worth), where pick k is worth the k-th highest
     projection in the player pool. Positive = they've drafted more than their
     slots are worth (players falling to them, others' mistakes); negative =
-    reaches. "starters": projected points of their best starting lineup now.
+    reaches. "espn_value": the same by ESPN's projections (what the room sees).
+    "starters": projected points of their best starting lineup now.
     """
     from .lineup import best_lineup
 
     league = state.league
-    pool = sorted((p.proj_points for p in state.players.values() if not math.isnan(p.proj_points)),
-                  reverse=True)
-    out = [{"value": 0.0, "starters": 0.0} for _ in range(league.num_teams)]
+    ps = [p for p in state.players.values() if not math.isnan(p.proj_points)]
+    pool = sorted((p.proj_points for p in ps), reverse=True)
+    espn_pool = sorted((p.room_points for p in ps), reverse=True)
+    out = [{"value": 0.0, "espn_value": 0.0, "starters": 0.0} for _ in range(league.num_teams)]
     for k, pid in enumerate(state.picks):
         p = state.players.get(pid)
         if p is None or p.name == f"Unknown player {p.id}" or k >= len(pool):
             continue  # a pick we couldn't identify
-        out[league.team_for_pick(k)]["value"] += p.proj_points - pool[k]
+        team = out[league.team_for_pick(k)]
+        team["value"] += p.proj_points - pool[k]
+        team["espn_value"] += p.room_points - espn_pool[k]  # the same, by ESPN's numbers
     for team, roster in enumerate(state.rosters()):
         starters, _ = best_lineup(roster, league.starting_slots)
         out[team]["starters"] = sum(p.proj_points for p in starters)

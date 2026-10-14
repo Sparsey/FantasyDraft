@@ -458,7 +458,8 @@ function renderTeams() {
   const st = S.status, A = S.strip.accuracy;
   $("acc").innerHTML = A ? `<span title="Across ${A.picks} opponent picks: how often the model's most likely player was the one taken">predictions: top guess right <b>${pct(A.top_hit)}</b></span>` : "";
   $("teams").innerHTML = `<table class="teams"><thead><tr><th>Team</th>
-      <th class="num" title="Rolling draft score: projected points (your combined numbers) of everyone they've taken, minus what those pick numbers are normally worth. + = value fell to them; − = reaches">Score</th>
+      <th class="num" title="Rolling draft score by your combined projections: points of everyone they've taken minus what those pick numbers are normally worth. + = value fell to them; − = reaches">Score</th>
+      <th class="num" title="The same score by ESPN's projections (what the room sees). Going off ESPN's board for your own list shows up here as a small minus">ESPN</th>
       <th class="num" title="Projected points of their best starting lineup now (your numbers), ranked among the teams">Starters</th>
       <th title="How the simulation models this team when they pick for themselves (hover a team for details)">Model</th>
       <th title="On autodraft now (ESPN picks by its rank, no randomness). Follows the draft room; click to set by hand">Auto</th></tr></thead><tbody>` +
@@ -468,6 +469,7 @@ function renderTeams() {
       return `<tr class="${cls}" title="${esc(teamTip(t))}">
         <td><span class="muted">${t.slot + 1}</span> <span class="nm">${esc(t.name)}${t.me ? " (you)" : ""}</span></td>
         <td class="num ${t.score > 0 ? "up" : t.score < 0 ? "dn" : "muted"}">${t.count ? signed(t.score) : "–"}</td>
+        <td class="num muted">${t.count ? signed(t.espn_score) : "–"}</td>
         <td class="num">${t.count ? `${t.starters.toLocaleString()} <span class="muted">#${t.starters_rank}</span>` : "–"}</td>
         <td>${t.me ? "" : `<select data-slot="${t.slot}">${opts}</select><span class="model">${modelTxt(t)}</span>`}</td>
         <td><span class="toggle${t.auto ? " on" : ""}" data-slot="${t.slot}" data-on="${t.auto ? 0 : 1}">${t.auto ? "AUTO" : ""}<span class="sw"></span></span></td>

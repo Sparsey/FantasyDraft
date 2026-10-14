@@ -426,7 +426,8 @@ class Dashboard:
             "me": {"slot": lg.my_slot, "name": names[lg.my_slot]},
             "sources": self.source_names,
             "teams": [{
-                "score": round(scores[i]["value"]), "starters": round(scores[i]["starters"]),
+                "score": round(scores[i]["value"]), "espn_score": round(scores[i]["espn_value"]),
+                "starters": round(scores[i]["starters"]),
                 "starters_rank": 1 + sum(s["starters"] > scores[i]["starters"] for s in scores),
                 "slot": i, "name": names[i], "strategy": t.strategy, "noise": t.noise,
                 "manager": t.manager, "view": t.view, "favorite_team": t.favorite_team,

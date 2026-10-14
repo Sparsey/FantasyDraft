@@ -845,6 +845,7 @@ def test_rolling_draft_score():
     st = DraftState(lg, pl, ["b", "a", "c"])  # x reached for b; a fell to y
     s = draft_scores(st)
     assert s[0]["value"] == -100 + 0 and s[1]["value"] == +100
+    assert s[0]["espn_value"] == -100 and s[1]["espn_value"] == +100  # no sources: same as ESPN
     assert s[0]["starters"] == 900 and s[1]["starters"] == 1000
 
 
