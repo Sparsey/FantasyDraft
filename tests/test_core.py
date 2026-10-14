@@ -1280,3 +1280,19 @@ def test_daily_lineups_by_default(tmp_path):
     assert load_league(f).bench_weight == 0.4
     f.write_text(_json.dumps({**cfg, "lineups": "custom", "bench_weight": 0.7}))
     assert load_league(f).bench_weight == 0.7
+
+
+def test_study_finds_the_list_each_drafter_follows():
+    from fantasydraft.study import study
+
+    true = [TeamProfile("follows adp", "adp", 0.05), TeamProfile("follows rank", "rank", 0.05)] + \
+        [TeamProfile(f"t{i}", "points", 0.05) for i in range(8)]
+    players, picks = _simulated_draft(true, 60, seed=1)
+    state = DraftState(League([TeamProfile(t.name, "unknown") for t in true], 9), players, picks)
+    state.auto_picks = {k for k in range(60) if state.league.team_for_pick(k) == 2}
+    out = study([("m", state)])
+    assert "AUTODRAFT (6 picks)" in out and "PEOPLE (48 picks)" in out
+    verdict = {ln[4:20].strip(): ln.rsplit("-> ", 1)[1] for ln in out.splitlines() if ln.startswith("  m ")}
+    assert verdict["follows adp"] == "ADP"
+    assert verdict["follows rank"] == "ESPN rank"
+    assert verdict["t1"] == "ESPN proj" and "t0" not in verdict  # t0 is on autodraft

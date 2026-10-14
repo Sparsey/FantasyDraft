@@ -72,6 +72,7 @@ python -m fantasydraft watch --league examples/league.json
 | `ui` | **draft dashboard** in its own window: live draft-room feed + recommendations + teams, one process ([browser/README.md](browser/README.md)) |
 | `draft` | interactive tracker: type picks and `auto`/`back` switches, recommendations after each |
 | `room` | follow the ESPN draft room live via a browser userscript and write `picks.txt` automatically ([browser/README.md](browser/README.md)) |
+| `study` | all your mocks in `mocks/` at once: where each pick sat on ESPN's rank, ADP and projections, by autodraft vs people, stage of the draft, and position need; which list each person follows. Quick; paste the output to tune the opponent models |
 | `sources` | check extra projection sources; who ESPN under/overrates |
 | `history` | how each league member drafted in a past season (`--write league.json` saves profiles) |
 | `capture` | record raw draft-room traffic (troubleshooting) |

@@ -574,6 +574,36 @@ def cmd_model_check(args) -> None:
     print(check(state, entries, sims=args.sims))
 
 
+def cmd_study(args) -> None:
+    """How the drafters in all your mocks actually pick."""
+    from .study import find_drafts, study
+
+    pairs = [(Path(p), Path(p).with_name(Path(p).stem + ".league.json")) for p in args.picks] \
+        if args.picks else find_drafts(args.folder)
+    if not pairs:
+        sys.exit(f"no mocks found in {args.folder}/ (picks files with their .league.json next to them)")
+    from .io import apply_league_sources, load_players, players_source
+
+    drafts, loaded = [], {}
+    for picks, league in pairs:
+        league = str(league) if league.exists() else "mock.json"
+        try:
+            # Mocks usually share one players sheet: download it once.
+            cfg = json.loads(Path(league).read_text(encoding="utf-8-sig"))
+            key = (args.players or players_source(league), json.dumps(cfg.get("sources"), sort_keys=True),
+                   cfg.get("espn_weight"))
+            if key not in loaded:
+                loaded[key] = load_players(key[0])
+                apply_league_sources(loaded[key], league)
+            st = load_state(None, league, picks, players=dict(loaded[key]))
+        except Exception as e:  # one broken mock shouldn't stop the rest
+            print(f"skipping {picks.name}: {e}")
+            continue
+        if len(st.picks) >= 2 * st.league.num_teams:
+            drafts.append((picks.stem, st))
+    print(study(drafts))
+
+
 def cmd_room(args) -> None:
     """Follow an ESPN draft room through the browser userscript; write picks.txt live."""
     from .capture import serve
@@ -845,6 +875,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--players", help=players_help)
     p.add_argument("--sims", type=int, default=150)
     p.set_defaults(func=cmd_model_check)
+
+    p = sub.add_parser("study", help="all your mocks: how autodraft and people actually pick (paste the output)")
+    p.add_argument("picks", nargs="*", help="picks files (default: every mock in mocks/)")
+    p.add_argument("--folder", default="mocks")
+    p.add_argument("--players", help=players_help)
+    p.set_defaults(func=cmd_study)
 
     p = sub.add_parser("room", help="follow an ESPN draft room live via the browser userscript (writes picks.txt)")
     files(p)

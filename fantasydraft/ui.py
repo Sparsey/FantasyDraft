@@ -211,7 +211,7 @@ class Dashboard:
         with self.lock:
             self.predictions = preds
             for row in preds:
-                self.pred_history[row["pick"]] = dict(list(row["probs"].items())[:15])
+                self.pred_history[row["pick"]] = dict(list(row["probs"].items())[:30])
 
     def _quick(self, st: DraftState, probs: dict | None = None) -> dict:
         """The fast part: top available players by your numbers (plus ESPN's top),
@@ -584,10 +584,22 @@ class Dashboard:
             p = st.players[pid]
             return {"name": p.name, "pos": _pos(p)}
 
+        def before(i: int) -> dict[str, float] | None:
+            """The prediction for pick i, given the picks made before it: the
+            prediction may have been made a few picks earlier (fast rooms), so
+            players taken since are dropped and the rest scaled back up."""
+            pred = self.pred_history.get(i)
+            if not pred:
+                return pred
+            gone = set(st.picks[:i])
+            left = {k: v for k, v in pred.items() if k not in gone}
+            total = sum(left.values())
+            return {k: v / total for k, v in left.items()} if total > 0 else {}
+
         past = []
         for i in range(max(0, pick - 4), pick):
             pid, slot = st.picks[i], lg.team_for_pick(i)
-            pred = self.pred_history.get(i)
+            pred = before(i)
             guess = next(iter(pred.items()), None) if pred else None
             past.append({"pick": i + 1, "team": tr.name(slot), "mine": slot == lg.my_slot,
                          "auto": i in st.auto_picks, **brief(pid),
@@ -613,7 +625,7 @@ class Dashboard:
                              if slot == lg.my_slot and row["pick"] == st.my_next_picks()[0] else None,
             })
         # How well the model has predicted opponents' picks so far.
-        scored = [(self.pred_history[i], pid, i in st.auto_picks) for i, pid in enumerate(st.picks)
+        scored = [(before(i), pid, i in st.auto_picks) for i, pid in enumerate(st.picks)
                   if i in self.pred_history and lg.team_for_pick(i) != lg.my_slot]
 
         def rates(rows):
