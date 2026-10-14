@@ -225,7 +225,7 @@ class Dashboard:
                  "tag": "safe" if probs is not None and p is espn_top else None,
                  "is_baseline": probs is not None and p is espn_top} for p in shown]
         return {"recs": rows, "advice": None, "has_sources": self._has_sources(st),
-                "underrated": self._underrated(st, probs or {})}
+                "underrated": self._underrated(st, probs or {}), "floor_proj": self._floor_proj(st)}
 
     BOARD_SIZE = 14
 
@@ -254,6 +254,10 @@ class Dashboard:
             acc += likely.get(p.id, 0.0)
             out[p.id] = round(min(acc, 1.0), 3)
         return out
+
+    def _floor_proj(self, st: DraftState) -> int | None:
+        fid = self._floor(st)
+        return round(st.players[fid].proj_points) if fid else None
 
     @staticmethod
     def _floor(st: DraftState) -> str | None:
@@ -380,6 +384,7 @@ class Dashboard:
             "recs": rows,
             "underrated": self._underrated(st, probs),
             "has_sources": self._has_sources(st),
+            "floor_proj": self._floor_proj(st),
         }
 
     @staticmethod

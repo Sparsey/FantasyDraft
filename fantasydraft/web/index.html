@@ -276,7 +276,11 @@ function availLine(r, i, cols) {
   const prev = r.recs[i - 1], at = S.status.my_next;
   const crossed = (t) => (prev.p_best_up ?? 0) >= t && (i < 2 || (r.recs[i - 2].p_best_up ?? 0) < t);
   const row = (c, t) => `<tr class="avl ${c}"><td colspan="${cols}"><span>${t}</span></td></tr>`;
-  if (prev.is_floor) return row("floor", `100%: you get someone above this line at #${at}`);
+  // The floor line goes under the last listed player at least as good as the
+  // floor (the floor player himself may be hidden as almost sure to be gone).
+  const fp = r.floor_proj;
+  if (fp != null && prev.proj >= fp && r.recs[i].proj < fp)
+    return row("floor", `100%: you get someone above this line at #${at}`);
   if (crossed(0.9)) return row("sure", `90% chance you get someone above this line at #${at}`);
   if (crossed(0.5)) return row("half", `50% chance you get someone above this line at #${at}`);
   return "";
