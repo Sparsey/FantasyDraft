@@ -85,6 +85,9 @@ class Dashboard:
         self.wake = threading.Condition(self.lock)
         self.result: dict = {"version": -1}
         self.done_version = -1  # last version fully computed
+        self._prev_chances: tuple[int | None, dict] = (None, {})  # (my next pick, chances) last time
+        self._prev: dict = {}  # chances to compare with in this round of updates
+        self._last_order: list[str] = []  # recommendation order last time (keeps rows steady)
         self.computing = False
         self.predictions: list[dict] = []
         self.pred_history: dict[int, dict[str, float]] = {}  # pick -> {player: P} predicted beforehand
@@ -133,6 +136,9 @@ class Dashboard:
                 if not st.is_complete and st.my_next_picks():
                     likely: dict[str, float] = {}
                     probs = availability(st, sims=availability_sims(self.sims), seed=1, likely=likely)
+                    nxt = st.my_next_picks()[0]
+                    self._prev = self._prev_chances[1] if self._prev_chances[0] == nxt else {}
+                    self._prev_chances = (nxt, probs)
                     outlook = self._outlook(st, probs, likely)
                     if not self._publish(version, {**self._quick(st, probs), "outlook": outlook}, "chances"):
                         continue
@@ -146,6 +152,7 @@ class Dashboard:
                 result = {"error": "recommendation failed — see terminal"}
             if not self._publish(version, result, "full"):
                 continue
+            self._last_order = [x["id"] for x in result.get("recs") or []]
             with self.lock:
                 self.computing = False
                 self.done_version = version
@@ -188,10 +195,13 @@ class Dashboard:
         espn_top = max(avail, key=lambda p: (p.room_points, p.proj_points), default=None)
         if espn_top is not None and espn_top not in shown:
             shown.append(espn_top)
+        # Keep last time's order while the new comparison is worked out.
+        order = {pid: i for i, pid in enumerate(self._last_order)}
+        shown.sort(key=lambda p: (order.get(p.id, len(order)), -p.proj_points))
         rows = []
         for p in shown:
             pr = (probs or {}).get(p.id, [])
-            rows.append({**self._player_fields(p),
+            rows.append({**self._player_fields(p), **self._trend(st, p, probs),
                          "p_now": 1.0 if on_clock else (pr[0] if pr else None) if probs is not None else None,
                          "p_after": (pr[1] if len(pr) > 1 else 0.0) if probs is not None else None,
                          "tag": "safe" if probs is not None and p is espn_top else None,
@@ -201,9 +211,8 @@ class Dashboard:
 
     @staticmethod
     def _outlook(st: DraftState, probs: dict, likely: dict[str, float]) -> dict | None:
-        """What you can expect at your next pick when you're not on the clock:
-        who is likely the best player left (by your projections), and players
-        ESPN ranks before your pick who could still fall to you."""
+        """When you're not on the clock: who is likely the best player left (by
+        your projections) at your next pick."""
         mine = st.my_next_picks()
         if not mine or mine[0] == st.current_pick:
             return None
@@ -215,12 +224,20 @@ class Dashboard:
                     "espn": round(p.room_points), "rank": None if rank is None else int(rank)}
 
         top = sorted(likely.items(), key=lambda kv: -kv[1])[:4]
-        fallers = [p for p in st.available()
-                   if math.isfinite(p.espn_rank) and p.espn_rank <= pick - 3 and (probs.get(p.id) or [0])[0] >= 0.15]
-        fallers.sort(key=lambda p: -p.proj_points)
         return {"pick": pick, "away": mine[0] - st.current_pick,
-                "likely": [brief(st.players[pid], c) for pid, c in top if c >= 0.05],
-                "fallers": [brief(p, probs[p.id][0]) for p in fallers[:4]]}
+                "likely": [brief(st.players[pid], c) for pid, c in top if c >= 0.05]}
+
+    def _trend(self, st: DraftState, p: Player, probs: dict | None) -> dict:
+        """Whether a player is falling to you (ESPN ranks them 3+ picks before
+        your pick, yet they have a real chance of lasting), and how their chance
+        of lasting changed since the last pick."""
+        mine = st.my_next_picks()
+        if probs is None or not mine or mine[0] == st.current_pick:
+            return {}
+        now = (probs.get(p.id) or [0])[0]
+        before = (self._prev.get(p.id) or [None])[0]
+        return {"falling": math.isfinite(p.espn_rank) and p.espn_rank <= mine[0] + 1 - 3 and now >= 0.15,
+                "p_change": None if before is None else round(now - before, 2)}
 
     @staticmethod
     def _player_fields(p: Player) -> dict:
@@ -261,7 +278,7 @@ class Dashboard:
         return {
             "advice": advice,
             "recs": [{
-                **self._player_fields(r.player),
+                **self._player_fields(r.player), **self._trend(st, r.player, probs),
                 "p_now": r.p_avail_now, "p_after": r.p_avail_after,
                 "value": round(r.exp_final_value),
                 **vs_fields(r),
@@ -284,7 +301,8 @@ class Dashboard:
         now_pick = mine[0] + 1
         later = mine[1] + 1 if len(mine) > 1 else None
         if best.player.id == top.player.id:
-            return {"kind": "same", "top": top.player.name, "pick": now_pick}
+            return {"kind": "same", "top": top.player.name, "pick": now_pick,
+                    "top_p": top.p_avail_now, "away": mine[0] - st.current_pick}
         gain = round(top.exp_final_value - best.exp_final_value)
         reasons = []
         if later and best.p_avail_after - top.p_avail_after >= 0.2:
@@ -323,7 +341,8 @@ class Dashboard:
         return {"kind": "close" if gain < 40 else "different", "top": top.player.name,
                 "best": best.player.name, "best_proj": round(best.player.room_points),
                 "top_proj": round(top.player.proj_points), "gain": gain, "reasons": reasons,
-                "pick": now_pick}
+                "pick": now_pick, "top_p": top.p_avail_now, "best_p": best.p_avail_now,
+                "away": mine[0] - st.current_pick}
 
     def _underrated(self, st: DraftState, probs: dict) -> list[dict]:
         """Available players the consensus ranks well above ESPN (the room's view)."""

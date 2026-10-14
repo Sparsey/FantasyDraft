@@ -118,12 +118,18 @@
   td.up { color: var(--good); font-weight: 600; } td.dn { color: var(--bad); }
   .ptag { font-size: 10px; font-weight: 800; letter-spacing: .04em; border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
   .ptag.safe { color: var(--good); background: var(--good-soft); border: 1px solid var(--good); }
+  .ptag.fall { color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent); }
+  .chg { font-size: 10.5px; font-weight: 700; margin-right: 4px; font-variant-numeric: tabular-nums; }
+  .chg.up { color: var(--good); } .chg.dn { color: var(--bad); }
+  .advice.updating { opacity: .55; }
+  .tline { display: flex; flex-wrap: wrap; gap: 3px 18px; align-items: baseline; color: var(--ink); }
+  .tline .tgt { font-size: 14.5px; }
+  .likely { font-size: 12px; color: var(--muted); margin-top: 3px; }
   .ptag.gamble { color: var(--warn); background: var(--warn-soft); border: 1px solid var(--warn); }
   .gap { display: inline-block; font-weight: 700; border-radius: 5px; padding: 0 6px; font-variant-numeric: tabular-nums; }
   .gap small { font-weight: 500; opacity: .8; }
   .gap.gup { color: var(--good); background: var(--good-soft); }
   .gap.gdn { color: var(--bad); background: var(--bad-soft); }
-  .outlook { padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px dashed var(--line); color: var(--ink); }
   .agr { font-size: 10.5px; font-weight: 600; color: var(--muted); margin-left: 4px; }
   .advice { margin: 8px 10px 4px; padding: 8px 11px; border-radius: 8px; font-size: 13px; line-height: 1.45;
             background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
@@ -231,50 +237,59 @@ const projCells = (x) => {
   return `<td class="num muted">${x.espn != null ? x.espn.toLocaleString() : "–"}</td>
     <td class="num"><b>${x.proj.toLocaleString()}</b></td><td class="num" title="${esc(t)}">${pill}</td>`;
 };
-function outlookHtml(o) {
-  if (!o) return "";
-  const who = (x) => `<b>${esc(x.name)}</b> ${pct(x.p)}`;
-  const lk = o.likely.length ? `<div><b>Likely best left at your pick #${o.pick}</b> (${o.away} picks away, by your projections): ` +
-    o.likely.map(who).join(" · ") + `</div>` : "";
-  const fl = o.fallers.length ? `<div style="margin-top:3px">Could fall to you (ESPN ranks them before #${o.pick}): ` +
-    o.fallers.map((x) => `<b>${esc(x.name)}</b> <span class="muted">ESPN #${x.rank}</span> ${pct(x.p)}`).join(" · ") + `</div>` : "";
-  return lk || fl ? `<div class="outlook">${lk}${fl}</div>` : "";
+// The summary line: the target (top of the list), ESPN's pick if different,
+// a GAMBLE if there is one, and who is likely best left at your pick. While a
+// new comparison is worked out, the last summary stays up (faded) instead of
+// being replaced by progress text.
+let lastAdvice = {html: "", target: null};
+function likelyLine(o) {
+  if (!o || !o.likely.length) return "";
+  return `<div class="likely" title="In the simulated drafts: who is the best player left (by your projections) when your pick comes">` +
+    `Likely best left at #${o.pick}: ${o.likely.map((x) => `${esc(x.name)} ${pct(x.p)}`).join(" · ")}</div>`;
 }
 function renderAdvice(a, r) {
   const box = $("advice");
-  const ol = outlookHtml(r && r.outlook);
-  if (!a && r && r.stage && r.stage !== "full" && (r.recs || []).length) {
-    box.hidden = false; box.className = "advice";
-    box.innerHTML = ol + (r.stage === "quick" ? "Available players by your projections. Chances of lasting to your pick in a moment…"
-      : "Comparing the options over simulated drafts (vs SAFE, GAMBLE)…");
-    return;
+  const recs = (r && r.recs) || [];
+  const working = r && r.stage && r.stage !== "full";
+  if (!a) {
+    if (working && recs.length) {
+      const still = lastAdvice.target && recs.some((x) => x.name === lastAdvice.target);
+      box.hidden = false; box.className = "advice updating";
+      box.innerHTML = still ? lastAdvice.html : (likelyLine(r.outlook) || "Working out your target…");
+      return;
+    }
+    box.hidden = true; return;
   }
-  if (!a) { box.hidden = !ol; box.className = "advice"; box.innerHTML = ol; return; }
-  box.hidden = false;
-  box.className = "advice " + a.kind;
-  const g = a.gamble;
-  const gl = g ? `<div style="margin-top:4px"><span class="ptag gamble" style="margin:0 6px 0 0">GAMBLE</span><b>${esc(g.name)}</b>:
-      ${pct(g.p_better)} chance of a better final roster (avg +${g.avg_up}), ${pct(g.p_worse)} worse (avg ${g.avg_down}).
-      Overall ${g.diff >= 0 ? "+" : ""}${g.diff}.</div>` : "";
-  if (a.kind === "same") {
-    box.innerHTML = ol + `<span class="ptag safe" style="margin:0 6px 0 0">SAFE</span>${S.status.picks_until ? "If still there at" : "Top pick at"} #${a.pick}: <b>${esc(a.top)}</b>, ESPN's top-projected player available.` + gl;
-    return;
-  }
-  const head = a.kind === "close"
-    ? `Close call at #${a.pick}: <b>${esc(a.top)}</b> (${a.top_proj.toLocaleString()}) edges out ESPN's top-projected <b>${esc(a.best)}</b> (ESPN ${a.best_proj.toLocaleString()}) by only ${a.gain} pts of final roster value. Either is fine.`
-    : `Take <b>${esc(a.top)}</b> (${a.top_proj.toLocaleString()}) over ESPN's top-projected <b>${esc(a.best)}</b> (ESPN ${a.best_proj.toLocaleString()}) at #${a.pick}: about <b>+${a.gain}</b> pts for your final roster.`;
-  box.innerHTML = ol + head + `<ul>${a.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` +
-    (g && g.name !== a.top ? gl : "");
+  const where = a.away ? `at #${a.pick}` : "now";
+  const there = a.away ? ` <span class="muted">${pct(a.top_p)} there</span>` : "";
+  const espn = a.kind === "same"
+    ? `<span class="muted">same as ESPN's pick</span>`
+    : `<span>ESPN would take <b>${esc(a.best)}</b>${a.away ? ` <span class="muted">${pct(a.best_p)} there</span>` : ""}` +
+      `${a.gain > 0 ? ` <span class="muted">(target +${a.gain})</span>` : ""}</span>`;
+  const g = a.gamble && a.gamble.name !== a.top
+    ? `<span><span class="ptag gamble" style="margin:0 4px 0 0">GAMBLE</span><b>${esc(a.gamble.name)}</b> <span class="muted">${pct(a.gamble.p_better)} chance better</span></span>` : "";
+  const why = (a.reasons || []).join("\n");
+  const html = `<div class="tline"${why ? ` title="${esc(why)}"` : ""}><span>Target ${where}: <b class="tgt">${esc(a.top)}</b>${there}</span>${espn}${g}</div>` +
+    likelyLine(r.outlook);
+  lastAdvice = {html, target: a.top};
+  box.hidden = false; box.className = "advice"; box.innerHTML = html;
 }
 function tagTxt(x) {
-  if (x.tag === "safe") return `<span class="ptag safe" title="Highest ESPN projection available now (what ESPN's board / autodraft would take)">SAFE</span>`;
-  if (x.tag === "gamble") return `<span class="ptag gamble" title="Taking this player instead ends with a better final roster in many simulated drafts (see Better / worse)">GAMBLE</span>`;
-  return "";
+  let t = "";
+  if (x.tag === "safe") t += `<span class="ptag safe" title="ESPN's pick: its top projection among players you can realistically get (what ESPN's board and autodraft go by)">ESPN</span>`;
+  if (x.tag === "gamble") t += `<span class="ptag gamble" title="Ends with a better final roster than ESPN's pick in at least 40% of simulated drafts">GAMBLE</span>`;
+  if (x.falling) t += `<span class="ptag fall" title="ESPN ranks him well before your pick, but he has a real chance of lasting to you">FALLING</span>`;
+  return t;
+}
+function changeTxt(x) {
+  if (x.p_change == null || Math.abs(x.p_change) < 0.05) return "";
+  const up = x.p_change > 0;
+  return `<span class="chg ${up ? "up" : "dn"}" title="Change in his chance of lasting to your pick since the last pick">${up ? "▲" : "▼"}${Math.round(Math.abs(x.p_change) * 100)}</span>`;
 }
 function riskTip(x) {
   if (x.p_better == null) return "";
   const same = Math.max(0, 1 - x.p_better - x.p_worse);
-  return `Versus the SAFE pick, across simulated drafts:\n` +
+  return `Versus ESPN's pick, across simulated drafts:\n` +
     `better in ${pct(x.p_better)}${x.p_better > 0.005 ? ` (avg +${x.avg_up})` : ""}\n` +
     `worse in ${pct(x.p_worse)}${x.p_worse > 0.005 ? ` (avg ${x.avg_down})` : ""}\n` +
     `about the same in ${pct(same)}`;
@@ -451,13 +466,13 @@ function renderTable(r) {
       ${r.has_sources ? projHead : `<th class="num">Proj</th>`}
       <th class="num" title="Chance the player is still there at your next pick">At my pick</th>
       <th class="num" title="Chance the player lasts to the pick after that, if you pass">Lasts</th>
-      <th class="num" title="Final roster value (by your consensus numbers) compared with taking ESPN's top-projected player, the SAFE pick (averaged over simulated drafts)">vs SAFE</th>
+      <th class="num" title="Final roster value (by your combined numbers) compared with taking ESPN's pick, averaged over simulated drafts. Hover a value for how often it ends better or worse">vs ESPN pick</th>
       ${manual() ? "<th></th>" : ""}</tr></thead><tbody>` +
       r.recs.map((x, i) => `<tr class="${i === 0 && r.stage === "full" ? "top" : ""}" ${x.value != null ? `title="Final roster value ${x.value.toLocaleString()}"` : ""}>
         <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span>${tagTxt(x)}</td>
         ${r.has_sources ? projCells(x) : `<td class="num">${x.proj.toLocaleString()}</td>`}
-        <td class="num">${bar(x.p_now)}</td><td class="num">${bar(x.p_after)}</td>
-        ${x.is_baseline ? `<td class="num muted">SAFE</td>`
+        <td class="num">${changeTxt(x)}${bar(x.p_now)}</td><td class="num">${bar(x.p_after)}</td>
+        ${x.is_baseline ? `<td class="num muted">ESPN pick</td>`
           : `<td class="num ${x.vs_top > 0 ? "up" : x.vs_top < 0 ? "dn" : "muted"}" title="${esc(riskTip(x))}">${x.vs_top == null ? (r.stage === "full" ? "–" : "…") : (x.vs_top > 0 ? "+" : "") + x.vs_top}</td>`}
         ${manual() ? `<td>${addBtn(x.id)}</td>` : ""}</tr>`).join("") + `</tbody></table>`;
   } else if (tab === "under") {
