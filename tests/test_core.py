@@ -790,17 +790,17 @@ def test_safe_baseline_is_espns_top_projection():
     assert base.name == "espn top" and vs["consensus top"].diff == 200
 
 
-def test_gamble_is_a_favourable_coin_flip():
+def test_gamble_needs_a_real_edge():
     from fantasydraft.recommend import VsBaseline, pick_gamble
 
     def R(name):
         return Recommendation(Player(name, name, frozenset({"PG"}), 1000.0), 0, 1, 0, 0)
-    recs = [R("base"), R("flip"), R("bad"), R("tiny")]
-    vs = {"base": VsBaseline(0, 0, 0, 0, 0), "flip": VsBaseline(+20, 0.55, 150, 0.45, -140),
-          "bad": VsBaseline(-300, 0.10, 50, 0.90, -340), "tiny": VsBaseline(+5, 0.20, 40, 0.10, -30)}
-    assert pick_gamble(recs, vs, recs[0].player).name == "flip"
-    vs["flip"] = VsBaseline(-200, 0.45, 100, 0.55, -450)  # costs too much on average
-    assert pick_gamble(recs, vs, recs[0].player) is None
+    recs = [R("base"), R("edge"), R("bad"), R("tie")]
+    vs = {"base": VsBaseline(0, 0, 0, 0, 0), "edge": VsBaseline(+80, 0.62, 250, 0.38, -190),
+          "bad": VsBaseline(-300, 0.10, 50, 0.90, -340), "tie": VsBaseline(+10, 0.51, 200, 0.49, -190)}
+    assert pick_gamble(recs, vs, recs[0].player).name == "edge"
+    vs["edge"] = VsBaseline(+80, 0.45, 300, 0.55, -100)  # better on average, but worse more often than not
+    assert pick_gamble(recs, vs, recs[0].player) is None  # and "tie" is too small to be worth it
 
 
 def test_auto_in_league_file_is_the_autodraft_switch(tmp_path):
@@ -1155,3 +1155,17 @@ def test_model_check_runs_on_a_draft():
     lg = League([TeamProfile(t.name, "unknown", 0.2) for t in true], 9)
     text = check(DraftState(lg, players, picks), [("pick", p) for p in picks], sims=20)
     assert "early" in text and "late" in text and "all" in text
+
+
+def test_espn_counts_double_in_the_consensus(tmp_path):
+    from fantasydraft.sources import apply_sources
+
+    f = tmp_path / "src.csv"
+    f.write_text("PLAYER,GP,PTS,REB,AST,STL,BLK,TO,3PM,FGM,FGA,FTM,FTA\nA Guy,70,20,5,5,1,1,2,2,8,16,2,3\n")
+    def run(**kw):
+        p = {"1": Player("1", "A Guy", frozenset({"PG"}), 2000.0, espn_points=2000.0)}
+        apply_sources(p, {"x": str(f)}, **kw)
+        return p["1"].proj_points, p["1"].sources[1][1]
+    doubled, src = run()
+    equal, _ = run(espn_weight=1)
+    assert doubled == pytest.approx((2 * 2000 + src) / 3) and equal == pytest.approx((2000 + src) / 2)

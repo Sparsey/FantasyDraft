@@ -273,8 +273,12 @@ def source_config(value) -> dict:
     return cfg
 
 
+ESPN_WEIGHT = 2.0  # ESPN counts double: the other sources adjust it rather than outvote it
+
+
 def apply_sources(players: dict[str, Player], sources: dict[str, object],
-                  scoring: dict[str, float] | None = None) -> list[SourceReport]:
+                  scoring: dict[str, float] | None = None,
+                  espn_weight: float = ESPN_WEIGHT) -> list[SourceReport]:
     """Replace each player's proj_points with the consensus of ESPN and the sources.
 
     Players with a my_proj override keep it. A source missing scoring stats
@@ -321,7 +325,7 @@ def apply_sources(players: dict[str, Player], sources: dict[str, object],
     league_rate = all_rates[len(all_rates) // 2] if all_rates else DEFAULT_FT_RATE
 
     per_player: dict[str, list[tuple[str, float, float]]] = {
-        pid: [("ESPN", p.room_points, 1.0)] for pid, p in players.items()}
+        pid: [("ESPN", p.room_points, espn_weight)] for pid, p in players.items()}
     reports = []
     for sname, cfg in configs.items():
         found: dict[str, float] = {}

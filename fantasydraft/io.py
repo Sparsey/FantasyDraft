@@ -455,7 +455,10 @@ def apply_league_sources(players: dict[str, Player], league_path: str | Path) ->
         return []
     from .sources import apply_sources
 
-    reports = apply_sources(players, sources, scoring)
+    cfg = json.loads(Path(league_path).read_text(encoding="utf-8-sig"))
+    from .sources import ESPN_WEIGHT
+
+    reports = apply_sources(players, sources, scoring, float(cfg.get("espn_weight", ESPN_WEIGHT)))
     for r in reports:
         print(f"source {r.name}: {r.matched}/{r.rows} players matched"
               + (f", shooting estimated for {r.estimated}" if r.estimated else "")

@@ -17,13 +17,10 @@ def availability_sims(sims: int) -> int:
 
 MIN_AVAIL = 0.05
 
-# How far a player's real season can land from your projection: the spread of
-# your sources, but at least this share of the projection.
-MIN_UNCERTAINTY = 0.08
-
-
 def uncertainty(p: Player) -> float:
-    return max(p.spread, MIN_UNCERTAINTY * max(p.proj_points, 0.0))
+    """How unsure your projection of a player is: how much your sources
+    disagree about him (0 when they agree, or with ESPN alone)."""
+    return p.spread
 
 
 def _drawn(p: Player, draw: int) -> Player:
@@ -41,6 +38,9 @@ class Recommendation:
     p_avail_after: float  # P(still there at the pick after that) if I pass
     exp_final_value: float  # mean final roster value if I take them (or best fallback if gone)
     values: list[float] = field(default_factory=list)  # final roster value in each simulated draft (same seeds for all)
+    # The same rosters scored on drawn "true" seasons (your projections can be
+    # wrong): used for the chance of ending better, not for the average.
+    drawn: list[float] = field(default_factory=list)
 
 
 def candidate_pool(state: DraftState, k: int, exclude: set[str] = frozenset()) -> list[Player]:
@@ -98,14 +98,16 @@ def recommend(
     sim = Simulator(state)
     out: list[Recommendation] = []
     for p in candidate_pool(state, candidates, exclude=gone):
-        values = []
+        values, drawn = [], []
         for i in range(sims):
-            roster_i = sim.run(random.Random(seed * 1_000_003 + i), my_next=p).my_roster
-            # Score the final roster on one possible "truth": each player's real
-            # points drawn around your projection (same draw for every candidate
-            # in this simulated draft), so "chance better" also covers your
-            # projections being wrong, not just who the other teams take.
-            values.append(team_value([_drawn(q, seed * 7919 + i) for q in roster_i], league))
+            run = sim.run(random.Random(seed * 1_000_003 + i), my_next=p)
+            values.append(run.my_value)
+            # Also score the final roster on one possible "truth": each player's
+            # real points drawn around your projection (same draw for every
+            # candidate in this simulated draft), so the chance of ending better
+            # also covers your projections being wrong, not just who the other
+            # teams take. The average stays on your projections (no extra noise).
+            drawn.append(team_value([_drawn(q, seed * 7919 + i) for q in run.my_roster], league))
         probs = avail.get(p.id, [])
         out.append(
             Recommendation(
@@ -115,6 +117,7 @@ def recommend(
                 p_avail_after=probs[1] if len(probs) > 1 else 0.0,
                 exp_final_value=mean(values),
                 values=values,
+                drawn=drawn,
             )
         )
     out.sort(key=lambda r: r.exp_final_value, reverse=True)
@@ -143,20 +146,23 @@ def versus_highest_projection(recs: list[Recommendation]) -> tuple[Player | None
         diffs = [a - b for a, b in zip(r.values, base.values)]
         if not diffs:
             continue
-        up = [d for d in diffs if d > 0.5]
-        down = [d for d in diffs if d < -0.5]
+        # The odds (better / worse, by how much) from the drawn seasons when we
+        # have them; the average from the projections themselves.
+        odds = [a - b for a, b in zip(r.drawn, base.drawn)] if r.drawn and base.drawn else diffs
+        up = [d for d in odds if d > 0.5]
+        down = [d for d in odds if d < -0.5]
         out[r.player.id] = VsBaseline(
-            diff=mean(diffs), p_better=len(up) / len(diffs), avg_up=mean(up) if up else 0.0,
-            p_worse=len(down) / len(diffs), avg_down=mean(down) if down else 0.0)
+            diff=mean(diffs), p_better=len(up) / len(odds), avg_up=mean(up) if up else 0.0,
+            p_worse=len(down) / len(odds), avg_down=mean(down) if down else 0.0)
     return base.player, out
 
 
 def pick_gamble(recs: list[Recommendation], vs: dict[str, VsBaseline], baseline: Player | None,
-                min_better: float = 0.4, min_diff: float = -60.0) -> Player | None:
-    """The best alternative to the SAFE pick (ESPN's top projection) that is a real coin flip
-    in your favour: taking it ends with a better final roster in at least
-    `min_better` of the simulated drafts, without costing more than `min_diff`
-    on average. None if nothing qualifies."""
+                min_better: float = 0.5, min_diff: float = 30.0) -> Player | None:
+    """The best alternative to ESPN's pick that is worth the risk: on average at
+    least `min_diff` better for your final roster, and better in at least
+    `min_better` of the simulated drafts (counting your projections possibly
+    being wrong). None if nothing qualifies."""
     if baseline is None:
         return None
     options = [r for r in recs if r.player.id != baseline.id and r.player.id in vs

@@ -75,8 +75,9 @@ the draft room shows them. The gap between the two is your edge.
    source compares with ESPN overall ("median vs ESPN" should be near 1.00
    when the scoring matches), and the players ESPN under- and overrates.
 
-Each source counts equally by default (ESPN included). A source can instead
-be given a weight, and for **last season's actual stats** you should use
+ESPN counts double by default (`"espn_weight": 2` in the league file), so
+the other sources adjust ESPN's numbers rather than outvote them; each other
+source counts once. A source can instead be given a weight, and for **last season's actual stats** you should use
 per-game numbers × the games the projection sources expect, so players who
 missed time last season aren't punished for it:
 
