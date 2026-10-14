@@ -417,3 +417,23 @@ def test_simulator_uses_learned_noise():
     assert sim.profile(0).noise < 0.12  # 4 picks, all top of the list: well below the 0.2 guess
     off = League([TeamProfile(t.name, "adp", 0.2) for t in true], 9, learn_noise=False)
     assert Simulator(DraftState(off, players, picks)).profile(0).noise == 0.2
+
+
+def test_opponents_avoid_positions_they_have_filled():
+    pool = [P("c", "C", 100, adp=50), P("g", "PG", 99, adp=53)] + \
+        [P(f"x{i}", "SF", 50, adp=60 + i) for i in range(10)]
+    prof = TeamProfile("x", "adp", noise=0.15)
+    rng = random.Random(0)
+    takes = lambda full: sum(choose_pick(prof, pool, rng, 49, full=full, bias=0.35).name == "c" for _ in range(2000))
+    assert takes(frozenset()) > 600  # the C is usually taken when the team needs one
+    assert takes(frozenset({"C"})) < 150  # rarely once they already have enough centers
+
+
+def test_unknown_team_is_modelled_by_best_fit():
+    true = [TeamProfile("rank guy", "rank", 0.05)] + [TeamProfile(f"t{i}", "adp", 0.15) for i in range(9)]
+    players, picks = _simulated_draft(true, 60)
+    guess = League([TeamProfile(t.name, "unknown", 0.2) for t in true], 9)
+    sim = Simulator(DraftState(guess, players, picks))
+    assert sim.profile(0).strategy == "rank"
+    fresh = Simulator(DraftState(guess, players, []))
+    assert fresh.profile(0).strategy == "adp"  # no picks yet: default guess

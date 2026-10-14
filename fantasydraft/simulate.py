@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterator
 
-from .drafters import CANDIDATE_POOL, base_key, choose_pick, order_for
+from .drafters import CANDIDATE_POOL, add_to_counts, base_key, choose_pick, full_positions, order_for
 from .lineup import team_value
 from .models import POSITIONS, DraftState, Player
 
@@ -24,18 +24,22 @@ class SimResult:
 class Simulator:
     def __init__(self, state: DraftState):
         self.state = state
-        # Opponents' noise learned from their picks so far (league setting learn_noise).
+        # Opponents' noise (league setting learn_noise) and, for "unknown" teams,
+        # strategy, learned from their picks so far.
         self.learned = {}
-        if state.league.learn_noise and state.picks:
+        unknown = any(t.strategy == "unknown" for t in state.league.teams)
+        if state.picks and (state.league.learn_noise or unknown):
             from .learn import learned_profiles
 
             self.learned = learned_profiles(state)
         self.league = state.league
         self.slots = self.league.starting_slots
-        strategies = {t.strategy for t in self.league.teams} | {"points", "auto"}
+        strategies = ("auto", "adp", "rank", "points")
         players = list(state.players.values())
         self.orders = {s: order_for(s, players) for s in strategies}
         self.keys = {s: [base_key(s, p) for p in order] for s, order in self.orders.items()}
+        # "unknown" teams without picks yet are drafted as adp.
+        self.orders["unknown"], self.keys["unknown"] = self.orders["adp"], self.keys["adp"]
 
     def _untaken(self, strategy: str, taken: set[str]) -> Iterator[Player]:
         return (p for p in self.orders[strategy] if p.id not in taken)
@@ -53,7 +57,10 @@ class Simulator:
         strategy with learned noise."""
         if team in self.state.auto_teams:
             return self.state.profile(team)
-        return self.learned.get(team, self.state.profile(team))
+        profile = self.learned.get(team, self.state.profile(team))
+        if profile.strategy == "unknown":  # no picks to learn from yet
+            profile = replace(profile, strategy="adp")
+        return profile
 
     def _pool(self, strategy: str, taken: set[str], starts: dict[str, int]) -> tuple[list[Player], list[float]]:
         """First CANDIDATE_POOL untaken players (and their keys) for a strategy.
@@ -108,6 +115,13 @@ class Simulator:
         taken_at: dict[str, int] = {}
         starts: dict[str, int] = {}
         forced = my_next
+        bias = league.position_bias
+        targets = league.targets
+        counts: list[dict[str, float]] = [{} for _ in range(league.num_teams)]
+        if bias:
+            for t, roster in enumerate(self.state.rosters()):
+                for p in roster:
+                    add_to_counts(counts[t], p)
 
         for pick in range(self.state.current_pick, league.total_picks):
             team = league.team_for_pick(pick)
@@ -123,8 +137,11 @@ class Simulator:
             else:
                 profile = self.profile(team)
                 pool, keys = self._pool(profile.strategy, taken, starts)
-                choice = choose_pick(profile, pool, rng, pick, keys)
+                full = full_positions(counts[team], targets) if bias else frozenset()
+                choice = choose_pick(profile, pool, rng, pick, keys, full, bias)
                 taken_at[choice.id] = pick
+                if bias:
+                    add_to_counts(counts[team], choice)
             taken.add(choice.id)
 
         return SimResult(taken_at, my_roster, team_value(my_roster, league))

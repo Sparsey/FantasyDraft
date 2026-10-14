@@ -37,13 +37,14 @@ python -m fantasydraft watch --league examples/league.json
 
    | field | meaning |
    |---|---|
-   | `strategy` | `auto` (ESPN autodraft: best ESPN rank, deterministic), `adp` (drafts around ADP), `rank` (follows ESPN's board), `points` (drafts by projections) |
+   | `strategy` | `unknown` (default: modelled by whichever of adp/rank/points best fits their picks so far), `auto` (ESPN autodraft: best ESPN rank, deterministic), `adp` (drafts around ADP), `rank` (follows ESPN's board), `points` (drafts by projections). Set it yourself when you know the person |
    | `noise` | starting guess for how unpredictable they are (0.15 ≈ ±15% of draft slot). Updated from their own picks during the draft unless `learn_noise` is `false` |
    | `favorites` | `{"Player Name": 10}` → takes that player ~10 spots early |
    | `bench_weight` | how much bench points count vs starters (league-wide) |
    | `players` | players CSV path or Google Sheets link (league-wide) |
    | `position_targets` | roster balance, e.g. `{"PG": 3, "SG": 3, "SF": 2, "PF": 2, "C": 3}`. Default: an even split rounded up (3 each for 13 players). Multi-position players count wherever there's room |
    | `learn_noise` | learn each opponent's noise (and show their best-fitting strategy) from their picks; default `true` |
+   | `position_bias` | opponents (not on autodraft) are less likely to take a player at a position they've already filled to the targets: that player's draft slot is pushed back by this fraction (default `0.35`; `0` turns it off) |
    | `balance_penalty` | how much a player beyond the targets is discounted (default `0.2` = worth 80%; `0` turns balancing off) |
 
 3. **Draft day**: the most reliable option is following the draft room

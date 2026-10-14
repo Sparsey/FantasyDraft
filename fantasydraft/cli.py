@@ -348,7 +348,8 @@ def cmd_mock(args) -> None:
         if slot == league.my_slot:
             choice = sim.my_greedy_pick(state.rosters()[slot], taken)
         else:
-            choice = choose_pick(team, sim.top_untaken(team.strategy, taken, CANDIDATE_POOL), rng, pick)
+            prof = sim.profile(slot)
+            choice = choose_pick(prof, sim.top_untaken(prof.strategy, taken, CANDIDATE_POOL), rng, pick)
         state.picks.append(choice.id)
         save_picks(state.picks, state.players, args.picks)
         print(f"#{pick + 1:>3} {team.name:<20} {choice.name}")
@@ -398,7 +399,7 @@ def cmd_fetch_league(args) -> None:
         "bench_weight": existing.get("bench_weight", 0.4),
         "roster_slots": client.roster_slots(data),
         "espn_team_ids": client.pick_order(data),
-        "teams": [old.get(names[tid], {"name": names[tid], "strategy": "adp", "noise": 0.15})
+        "teams": [old.get(names[tid], {"name": names[tid], "strategy": "unknown", "noise": 0.2})
                   for tid in client.pick_order(data)],
     }
     out.write_text(json.dumps(cfg, indent=2))
@@ -548,8 +549,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--my-pick", type=int, required=True, help="your draft position (1 = first)")
     p.add_argument("--players", help="players CSV or Google Sheets link")
     p.add_argument("--names", help="comma-separated team names in draft order")
-    p.add_argument("--strategy", default="adp", choices=["auto", "adp", "rank", "points"],
-                   help="saved strategy for the other teams")
+    p.add_argument("--strategy", default="unknown", choices=["unknown", "auto", "adp", "rank", "points"],
+                   help="saved strategy for the other teams (unknown = learn from their picks)")
     p.add_argument("--noise", type=float, default=0.2)
     p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_new_league)

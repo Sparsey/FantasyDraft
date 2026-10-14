@@ -116,7 +116,7 @@ def load_league(path: str | Path) -> League:
     teams = [
         TeamProfile(
             name=t["name"],
-            strategy=t.get("strategy", "adp"),
+            strategy=t.get("strategy", "unknown"),
             noise=float(t.get("noise", 0.15)),
             favorites={k: float(v) for k, v in t.get("favorites", {}).items()},
         )
@@ -134,6 +134,7 @@ def load_league(path: str | Path) -> League:
         position_targets=cfg.get("position_targets"),
         balance_penalty=float(cfg.get("balance_penalty", 0.2)),
         learn_noise=bool(cfg.get("learn_noise", True)),
+        position_bias=float(cfg.get("position_bias", 0.35)),
     )
 
 

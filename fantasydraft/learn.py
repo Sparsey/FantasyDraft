@@ -17,7 +17,7 @@ import math
 import random
 from dataclasses import dataclass, replace
 
-from .drafters import CANDIDATE_POOL, base_key, order_for
+from .drafters import CANDIDATE_POOL, add_to_counts, base_key, full_positions, order_for
 from .models import DraftState, TeamProfile
 
 NOISE_GRID = (0.02, 0.04, 0.07, 0.10, 0.14, 0.19, 0.25, 0.33, 0.45)
@@ -30,7 +30,8 @@ OUTSIDE = 1e-3  # likelihood of a pick from outside a strategy's top 30
 @dataclass
 class TeamFit:
     picks: int  # own (non-autodraft) picks used
-    noise: float  # learned noise for the team's saved strategy
+    strategy: str  # strategy the simulation uses: the saved one, or best fit if "unknown"
+    noise: float  # learned noise for that strategy
     prior_noise: float
     fit: dict[str, float]  # strategy -> posterior probability
 
@@ -66,9 +67,13 @@ def _pick_evidence(state: DraftState) -> dict[int, list[dict[str, tuple[float, .
     orders = {s: order_for(s, players) for s in STRATEGIES}
     taken: set[str] = set()
     evidence: dict[int, list[dict[str, tuple[float, ...]]]] = {t: [] for t in range(league.num_teams)}
+    bias, targets = league.position_bias, league.targets
+    counts: list[dict[str, float]] = [{} for _ in range(league.num_teams)]
     for pick, pid in enumerate(state.picks):
         team = league.team_for_pick(pick)
         if pick not in state.auto_picks and team != league.my_slot:
+            # Same position-need adjustment the simulation applies.
+            full = full_positions(counts[team], targets) if bias else frozenset()
             row = {}
             for s in STRATEGIES:
                 pool = []
@@ -80,15 +85,19 @@ def _pick_evidence(state: DraftState) -> dict[int, list[dict[str, tuple[float, .
                 ids = [p.id for p in pool]
                 chosen = ids.index(pid) if pid in ids else len(ids)
                 if s == "points":
-                    keys = tuple(pick + i + 1.0 for i in range(len(pool)))
+                    raw = [pick + i + 1.0 for i in range(len(pool))]
                 else:
-                    keys = tuple(max(base_key(s, p), 0.1) for p in pool)
+                    raw = [max(base_key(s, p), 0.1) for p in pool]
+                keys = tuple(k * (1.0 + bias) if full and p.positions <= full else k
+                             for k, p in zip(raw, pool))
                 key = (s, pick, chosen, keys)
                 if key not in _CACHE:
                     _CACHE[key] = _choice_likelihoods(keys, chosen, seed=pick * 7 + len(s))
                 row[s] = _CACHE[key]
             evidence[team].append(row)
         taken.add(pid)
+        if bias:
+            add_to_counts(counts[team], state.players[pid])
     return evidence
 
 
@@ -116,16 +125,18 @@ def fit_teams(state: DraftState) -> dict[int, TeamFit]:
         saved = profile.strategy if profile.strategy in STRATEGIES else max(fit, key=fit.get)
         # Posterior mean in log space (noise is a scale parameter).
         noise = math.exp(sum(w * math.log(n) for w, n in zip(posts[saved], NOISE_GRID)))
-        out[team] = TeamFit(len(rows), round(noise, 3), prior_noise, fit)
+        out[team] = TeamFit(len(rows), saved, round(noise, 3), prior_noise, fit)
     return out
 
 
 def learned_profiles(state: DraftState) -> dict[int, TeamProfile]:
-    """Team profiles with noise replaced by the learned value (non-auto teams)."""
+    """Team profiles with noise replaced by the learned value (non-auto teams);
+    "unknown" teams also get their best-fitting strategy."""
     fits = fit_teams(state)
     out = {}
     for team, f in fits.items():
         profile = state.league.teams[team]
         if profile.strategy != "auto":
-            out[team] = replace(profile, noise=f.noise)
+            noise = f.noise if state.league.learn_noise else profile.noise
+            out[team] = replace(profile, strategy=f.strategy, noise=noise)
     return out

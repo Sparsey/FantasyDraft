@@ -23,6 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .analyze import analyze
+from .drafters import add_to_counts, full_positions
 from .io import apply_log, is_placeholder, load_state
 from .learn import fit_teams
 from .lineup import assign_lineup, target_fill
@@ -133,6 +134,12 @@ class Dashboard:
             suggestion = self.players.get(tr.suggestion) if tr.suggestion else None
             filled, over = target_fill(rosters[lg.my_slot], lg)
             tendencies = self._team_tendencies(st)
+            team_counts = []
+            for roster in rosters:
+                counts: dict[str, float] = {}
+                for p in roster:
+                    add_to_counts(counts, p)
+                team_counts.append(counts)
             return {
                 "version": tr.version,
                 "computing": self.computing or self.result["version"] != tr.version,
@@ -163,6 +170,9 @@ class Dashboard:
                     "auto": i in st.auto_teams, "me": i == lg.my_slot, "count": len(rosters[i]),
                     "last": rosters[i][-1].name if rosters[i] else None,
                     "observed": tendencies[i],
+                    "modelled_as": (tendencies[i] or {}).get("used") or
+                                   ("adp" if t.strategy == "unknown" else t.strategy),
+                    "full": sorted(full_positions(team_counts[i], lg.targets)),
                 } for i, t in enumerate(lg.teams)],
                 "positions": {"targets": lg.targets, "filled": filled,
                               "over": [p.name for p in over]},
@@ -192,6 +202,7 @@ class Dashboard:
                     "fit": {k: round(v, 2) for k, v in f.fit.items()} if f else None,
                     "best": best, "best_p": round(f.fit[best], 2) if f else None,
                     "noise": f.noise if f else None, "prior_noise": f.prior_noise if f else None,
+                    "used": f.strategy if f else None,
                     "suggested": suggested,
                 })
             self._tendencies = (version, rows)

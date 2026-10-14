@@ -54,17 +54,19 @@ class TeamProfile:
                   the ESPN draft board).
       - "points": drafts roughly by projected points, with noise (a "deep"
                   drafter who has done their own homework).
+      - "unknown": not set; the simulation uses whichever of adp/rank/points
+                  best fits the team's picks so far (adp before their first).
     noise: relative standard deviation applied to the sort key (0.15 = ±15%).
     favorites: player name -> how many spots earlier they will take that
                player than the strategy otherwise would.
     """
 
     name: str
-    strategy: str = "adp"
+    strategy: str = "unknown"
     noise: float = 0.15
     favorites: dict[str, float] = field(default_factory=dict)
 
-    VALID_STRATEGIES = ("auto", "adp", "rank", "points")
+    VALID_STRATEGIES = ("unknown", "auto", "adp", "rank", "points")
 
     def __post_init__(self) -> None:
         if self.strategy not in self.VALID_STRATEGIES:
@@ -87,6 +89,9 @@ class League:
     balance_penalty: float = 0.2
     # Learn each opponent's randomness from their own picks (fantasydraft.learn).
     learn_noise: bool = True
+    # Opponents (not on autodraft) avoid positions they've already filled to
+    # the targets: such players' draft slot is pushed back by this fraction.
+    position_bias: float = 0.35
 
     def __post_init__(self) -> None:
         for slot in self.roster_slots:

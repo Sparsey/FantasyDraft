@@ -203,7 +203,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const pct = (x) => x == null ? "–" : x <= 0 ? "0%" : x >= 1 ? "100%" : x < 0.01 ? "<1%" : x > 0.99 ? ">99%" : Math.round(x * 100) + "%";
 const signed = (x) => (x > 0 ? "+" : "") + x;
-const STRATS = {auto: "Autodraft (ESPN rank, no randomness)", adp: "Around ADP", rank: "Follows ESPN rank, loosely", points: "By projected points"};
+const STRATS = {unknown: "Unknown: learn from their picks", auto: "Autodraft (ESPN rank, no randomness)", adp: "Around ADP", rank: "Follows ESPN rank, loosely", points: "By projected points"};
 let S = null, players = [], playersVersion = -1, tab = "recs", clockAt = 0, sel = 0, lastRender = "";
 
 function bar(p) {
@@ -293,14 +293,15 @@ function renderTeams() {
         ${o.best ? `<span title="How well each strategy explains their picks: ${Object.entries(o.fit).map(([k, v]) => k + " " + Math.round(v * 100) + "%").join(", ")}">fits <b>${o.best} ${Math.round(o.best_p * 100)}%</b></span>` : ""}
         ${learned ? `<span title="Randomness learned from their picks (started at ${o.prior_noise}). Lower = more predictable. Used in the simulations.">noise <b>${o.prior_noise}→${o.noise.toFixed(2)}</b></span>` : ""}
         <span title="Average (ADP − pick number). Positive = takes players earlier than ADP">vs ADP <b>${signed(o.vs_adp)}</b></span>
-        ${o.suggested && o.suggested !== t.strategy && !t.me ? `<button class="use" data-slot="${t.slot}" data-strategy="${o.suggested}" title="Model this team as '${o.suggested}'">use ${o.suggested}</button>` : ""}
+        ${o.suggested && o.suggested !== t.strategy && t.strategy !== "unknown" && !t.me ? `<button class="use" data-slot="${t.slot}" data-strategy="${o.suggested}" title="Model this team as '${o.suggested}'">use ${o.suggested}</button>` : ""}
       </div>`;
     return `<div class="team${t.me ? " me" : ""}${st.on_clock && st.on_clock.slot === t.slot ? " onclock" : ""}">
       <div class="trow"><span class="n">${t.slot + 1}</span><span class="nm" title="${esc(t.name)}">${esc(t.name)}${t.me ? " (you)" : ""}</span>
         ${t.me ? "" : `<select data-slot="${t.slot}" title="How the simulation models this team">${opts}</select>`}
         <span class="toggle${t.auto ? " on" : ""}" data-slot="${t.slot}" data-on="${t.auto ? 0 : 1}" title="Mark as on/off autodraft right now">${t.auto ? "AUTO" : "auto"}<span class="sw"></span></span>
       </div>
-      <div class="tsub last">${t.count} picked${t.last ? " · last: " + esc(t.last) : ""}</div>${obs}
+      <div class="tsub last">${t.count} picked${t.last ? " · last: " + esc(t.last) : ""}${t.full.length ? ` · <span title="At their position target: the simulation makes them less likely to take more">full: <b>${t.full.join(", ")}</b></span>` : ""}</div>
+      ${t.strategy === "unknown" && !t.me && !t.auto ? `<div class="tsub">${o && o.used ? `modelled as <b>${o.used}</b> (best fit so far)` : "modelled as adp until their first pick"}</div>` : ""}${obs}
     </div>`;
   }).join("");
 }
