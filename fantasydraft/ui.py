@@ -264,6 +264,7 @@ class Dashboard:
                     "connected": self.page_connected is not None,
                     "last_message_age": None if tr.last_feed is None else time.time() - tr.last_feed,
                     "blocked": tr.blocked,
+                    "missing": tr.missing(),
                 },
                 "suggestion": None if suggestion is None else {"id": suggestion.id, "name": suggestion.name,
                                                                "pos": _pos(suggestion)},

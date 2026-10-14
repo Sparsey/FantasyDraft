@@ -294,7 +294,15 @@ function render() {
   $("feedtxt").textContent = f.blocked ? "lost track" : live ? "live from draft room" : f.connected ? "draft page connected" : "manual entry";
   const b = $("banner");
   b.className = "banner" + (f.blocked ? " show" : "");
-  b.textContent = f.blocked ? `Lost track of the draft (${f.blocked}). New picks are held until it catches up — open the draft room's Pick History, or Undo/enter picks here.` : "";
+  let missTxt = "";
+  if (f.blocked && f.missing) {
+    const [first, n] = f.missing;
+    missTxt = n ? (n === 1 ? `Pick #${first} is missing` : `Picks #${first}–#${first + n - 1} are missing`)
+                : `Some picks from #${first} on are missing`;
+  }
+  b.textContent = f.blocked ? `${missTxt || "Lost track of the draft"} (the page probably reloaded). ` +
+    `Enter ${missTxt ? "them" : "the missing picks"} in order in the box above (ESPN rank or name); ` +
+    `held picks then catch up by themselves. Opening the draft room's Pick History can also fix it.` : "";
 
   renderStrip();
   const r = S.result || {};

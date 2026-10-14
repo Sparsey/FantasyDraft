@@ -705,3 +705,32 @@ def test_history_from_past_draft():
     merged = merge_managers({"Person20 X": {"strategy": "feel"}}, rows)
     assert merged["Person20 X"]["strategy"] == "feel"  # hand-set value kept
     assert "T20" in merged["Person20 X"]["match"]
+
+
+def test_missed_picks_entered_by_hand_release_held_feed(tmp_path):
+    from fantasydraft.room import RoomTracker
+
+    league = _mock1_league()  # 10 teams; ESPN team id = draft position here
+    players = load_players(SAMPLE)
+    ids = sorted(players, key=lambda pid: players[pid].espn_rank)
+    tracker = RoomTracker(league, players, tmp_path / "picks.txt", log=lambda s: None)
+
+    def feed(pick):
+        team = league.team_for_pick(pick) + 1
+        tracker.handle_message(f"SELECTING {team} 60000")
+        tracker.handle_message(f"SELECTED {team} {ids[pick]} 1 member")
+
+    for k in range(12):
+        feed(k)
+    # Page reload: picks 13 and 14 (index 12, 13) are missed, then 15 and 16 arrive.
+    feed(14)
+    feed(15)
+    tracker.handle_page_text("ON THE CLOCK: PICK 17")
+    assert tracker.blocked
+    assert tracker.missing() == (13, 2)
+    assert len(tracker.picks) == 12
+    tracker.manual_pick(ids[12])
+    assert tracker.blocked  # one still missing
+    tracker.manual_pick(ids[13])
+    assert not tracker.blocked
+    assert tracker.picks == ids[:16]  # held picks 15 and 16 replayed in place

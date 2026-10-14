@@ -49,6 +49,7 @@ class RoomTracker:
         self.clock: tuple[float, float] | None = None  # (when seen, seconds left then)
         self.last_feed: float | None = None  # time of the last draft-room message
         self.recent_log: deque[str] = deque(maxlen=60)
+        self.page_done: int | None = None  # picks made so far, per the draft page
         outer_log = log
 
         def _log(line: str) -> None:
@@ -101,7 +102,29 @@ class RoomTracker:
         self.clock = None
         line = f"#{pick + 1:>3} {self.name(slot):<24} {self.players[pid].name}  (entered by hand)"
         self.log(line)
+        if self.blocked:
+            self.try_release()
         return line
+
+    def missing(self) -> tuple[int, int | None] | None:
+        """While out of sync: (first missing pick number, how many are missing or None if unknown)."""
+        if not self.blocked:
+            return None
+        first = len(self.picks) + 1
+        if self.page_done is None:
+            return first, None
+        held = sum(1 for m in self.buffer if m.startswith("SELECTED"))
+        return first, max(self.page_done - len(self.picks) - held, 0)
+
+    def try_release(self) -> None:
+        """Replay held feed messages now that missing picks may have been filled in
+        by hand; if they still don't line up, we stay held."""
+        pending, self.buffer = self.buffer, []
+        self.blocked = None
+        for data in pending:
+            self.handle_message(data)
+        if not self.blocked:
+            self.log("Back in sync.")
 
     def undo(self) -> str:
         if not self.entries:
@@ -230,8 +253,13 @@ class RoomTracker:
         if not m:
             return
         done = int(m.group(1)) - 1
+        self.page_done = done
         if len(self.picks) >= done and not self.blocked:
             return
+        if self.blocked and len(self.picks) + sum(m.startswith("SELECTED") for m in self.buffer) >= done:
+            self.try_release()  # e.g. the missing picks were entered by hand
+            if not self.blocked:
+                return
         recovered = self._recover(text, done)
         if recovered is None:
             self._out_of_sync(f"page is at pick {done + 1}, but only {len(self.picks)} picks are known")
