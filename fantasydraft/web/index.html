@@ -118,6 +118,9 @@
   .bar.hi i b { background: var(--good); } .bar.lo i b { background: var(--bad); }
   .bar span { min-width: 34px; text-align: right; }
   td.up { color: var(--good); font-weight: 600; } td.dn { color: var(--bad); }
+  td.risk { font-size: 12px; white-space: nowrap; }
+  .rk-up { color: var(--good); font-weight: 600; margin-right: 6px; } .rk-dn { color: var(--bad); font-weight: 600; margin-right: 6px; }
+  .rk-up small, .rk-dn small { font-weight: 500; }
   .agr { font-size: 10.5px; font-weight: 600; color: var(--muted); margin-left: 4px; }
   .advice { margin: 8px 10px 4px; padding: 8px 11px; border-radius: 8px; font-size: 13px; line-height: 1.45;
             background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
@@ -196,7 +199,7 @@
 <main>
   <section class="panel p-recs">
     <div class="head">
-      <div class="tabs"><button class="on" data-tab="recs">Recommendations</button><button data-tab="avail">Best available</button><button data-tab="under" id="undertab" hidden>ESPN underrates</button></div>
+      <div class="tabs"><button class="on" data-tab="recs">Recommendations</button><button data-tab="under" id="undertab" hidden>ESPN underrates</button></div>
       <span class="spin" id="spin"></span>
     </div>
     <div class="advice" id="advice" hidden></div>
@@ -258,6 +261,13 @@ function renderAdvice(a) {
     ? `Close call at #${a.pick}: <b>${esc(a.top)}</b> (${a.top_proj.toLocaleString()}) edges out the highest-projected <b>${esc(a.best)}</b> (${a.best_proj.toLocaleString()}) by only ${a.gain} pts of final roster value. Either is fine.`
     : `Take <b>${esc(a.top)}</b> (${a.top_proj.toLocaleString()}) over the highest-projected <b>${esc(a.best)}</b> (${a.best_proj.toLocaleString()}) at #${a.pick}: about <b>+${a.gain}</b> pts for your final roster.`;
   box.innerHTML = head + `<ul>${a.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`;
+}
+function riskTxt(x) {
+  if (x.p_better == null) return "–";
+  const part = (p, avg, cls, arrow) => p > 0.005 ? `<span class="${cls}">${arrow} ${pct(p)} <small>(${avg > 0 ? "+" : ""}${avg})</small></span>` : "";
+  const same = 1 - x.p_better - x.p_worse;
+  return [part(x.p_better, x.avg_up, "rk-up", "▲"), part(x.p_worse, x.avg_down, "rk-dn", "▼"),
+          same > 0.5 ? `<span class="muted">${pct(same)} same</span>` : ""].filter(Boolean).join(" ") || '<span class="muted">same</span>';
 }
 const addBtn = (id) => `<button class="add" data-pick="${esc(id)}" title="Record as the next pick">+</button>`;
 
@@ -408,16 +418,17 @@ function renderTable(r) {
     if (!r.recs.length) { body.innerHTML = `<div class="empty-note">Nothing to recommend — your draft is done.</div>`; return; }
     body.innerHTML = `<table><thead><tr><th>Player</th><th class="num">Rank</th><th class="num">Proj</th>
       <th class="num" title="Your consensus projection minus ESPN's (hover a value for each source)">vs ESPN</th>
-      <th class="num" title="Immediate gain to your lineup, after roster balance">Gain</th>
       <th class="num" title="Chance the player is still there at your next pick">At my pick</th>
       <th class="num" title="Chance the player lasts to the pick after that, if you pass">Lasts</th>
-      <th class="num" title="Projected final roster value vs the best option (averaged over simulated drafts)">vs best</th><th></th></tr></thead><tbody>` +
+      <th class="num" title="Final roster value compared with taking the highest-projected player (averaged over simulated drafts)">vs top proj</th>
+      <th title="Across the simulated drafts: how often taking this player ends with a better / worse roster than taking the highest-projected player, and by how much on average">Better / worse</th><th></th></tr></thead><tbody>` +
       r.recs.map((x, i) => `<tr class="${i === 0 ? "top" : ""}" title="Final roster value ${x.value.toLocaleString()}">
         <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span></td>
         <td class="num muted">${x.rank ?? "–"}</td><td class="num">${x.proj}</td>${vsEspn(x)}
-        <td class="num ${x.gain < x.proj ? "muted" : ""}">+${x.gain}</td>
         <td class="num">${bar(x.p_now)}</td><td class="num">${bar(x.p_after)}</td>
-        <td class="num vs ${x.vs_best < 0 ? "neg" : ""}">${x.vs_best === 0 ? "best" : x.vs_best}</td>
+        ${x.is_baseline ? `<td class="num muted">baseline</td><td class="muted" style="font-size:12px">highest projected</td>`
+          : `<td class="num ${x.vs_top > 0 ? "up" : x.vs_top < 0 ? "dn" : "muted"}">${x.vs_top == null ? "–" : (x.vs_top > 0 ? "+" : "") + x.vs_top}</td>
+             <td class="risk">${riskTxt(x)}</td>`}
         <td>${addBtn(x.id)}</td></tr>`).join("") + `</tbody></table>`;
   } else if (tab === "under") {
     const U = r.underrated || [];

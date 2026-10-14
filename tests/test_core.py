@@ -751,3 +751,22 @@ def test_stale_recommendations_drop_drafted_players(tmp_path):
     r = dash._current_result(dash.state())
     assert r["stale"] and [x["id"] for x in r["recs"]] == [p.id for p in top[1:]]
     assert r["advice"] is None
+
+
+def test_versus_highest_projection_split():
+    from fantasydraft.recommend import versus_highest_projection
+
+    def Q(n, pos, pts, rank):
+        return Player(n, n, frozenset(pos.split("/")), float(pts), float(rank), float(rank))
+
+    pl = [Q("Filler 0", "SF", 900, 1), Q("Guard A", "PG", 3000, 2), Q("Center A", "C", 2000, 3),
+          Q("Filler 1", "SF", 800, 4), Q("Filler 2", "SF", 790, 5), Q("Filler 3", "SF", 780, 6),
+          Q("Guard B", "PG", 2500, 7), Q("Center B", "C", 1000, 8)] + [Q(f"f{i}", "SF", 300 - i, 9 + i) for i in range(12)]
+    players = {p.id: p for p in pl}
+    teams = [TeamProfile("Opp1", "auto"), TeamProfile("Me", "adp"), TeamProfile("Opp2", "auto"), TeamProfile("Opp3", "auto")]
+    lg = League(teams, 1, roster_slots={"PG": 1, "C": 1, "BE": 2}, balance_penalty=0)
+    recs = recommend(DraftState(lg, players, ["Filler 0"]), candidates=4, sims=8)
+    base, vs = versus_highest_projection(recs)
+    assert base.name == "Guard A" and vs["Guard A"].diff == 0
+    c = vs["Center A"]
+    assert c.diff >= 400 and c.p_better == 1.0 and c.p_worse == 0.0

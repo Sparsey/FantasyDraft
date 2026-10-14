@@ -28,7 +28,7 @@ from .io import apply_log, apply_manager, is_placeholder, league_managers, load_
 from .learn import fit_teams
 from .lineup import assign_lineup, over_targets, target_fill
 from .models import DraftState, Player, TeamProfile
-from .recommend import recommend
+from .recommend import recommend, versus_highest_projection
 from .room import RoomTracker
 from .simulate import availability, predict_picks
 
@@ -131,6 +131,16 @@ class Dashboard:
         top = sorted((p for p in st.available() if not is_placeholder(p)),
                      key=lambda p: p.proj_points, reverse=True)[:40]
         best = recs[0].exp_final_value if recs else 0.0
+        baseline, vs = versus_highest_projection(recs)
+
+        def vs_fields(r):
+            v = vs.get(r.player.id)
+            if v is None:
+                return {}
+            return {"vs_top": round(v.diff), "is_baseline": baseline is not None and r.player.id == baseline.id,
+                    "p_better": v.p_better, "avg_up": round(v.avg_up), "p_worse": v.p_worse,
+                    "avg_down": round(v.avg_down)}
+
         return {
             "advice": advice,
             "recs": [{
@@ -141,6 +151,7 @@ class Dashboard:
                 "sources": [[n, round(v)] for n, v in r.player.sources], "agree": _agree(r.player),
                 "p_now": r.p_avail_now, "p_after": r.p_avail_after,
                 "value": round(r.exp_final_value), "vs_best": round(r.exp_final_value - best),
+                **vs_fields(r),
             } for r in recs],
             "available": [{
                 "id": p.id, "name": p.name, "pos": _pos(p), "team": p.nba_team,

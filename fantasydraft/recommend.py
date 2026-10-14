@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from statistics import mean
 
 from .lineup import team_value
@@ -17,6 +17,7 @@ class Recommendation:
     p_avail_now: float  # P(still there at my next pick) — 1.0 if I'm on the clock
     p_avail_after: float  # P(still there at the pick after that) if I pass
     exp_final_value: float  # mean final roster value if I take them (or best fallback if gone)
+    values: list[float] = field(default_factory=list)  # final roster value in each simulated draft (same seeds for all)
 
 
 def candidate_pool(state: DraftState, k: int, exclude: set[str] = frozenset()) -> list[Player]:
@@ -79,7 +80,37 @@ def recommend(
                 p_avail_now=1.0 if on_clock else (probs[0] if probs else 0.0),
                 p_avail_after=probs[1] if len(probs) > 1 else 0.0,
                 exp_final_value=mean(values),
+                values=values,
             )
         )
     out.sort(key=lambda r: r.exp_final_value, reverse=True)
     return out
+
+
+@dataclass
+class VsBaseline:
+    """A candidate compared with taking the highest-projected player, draft by draft."""
+    diff: float  # mean final-roster difference (+ = better than the baseline)
+    p_better: float  # share of simulated drafts where it ends better
+    avg_up: float  # average gain in those drafts
+    p_worse: float
+    avg_down: float  # average loss (negative) in drafts where it ends worse
+
+
+def versus_highest_projection(recs: list[Recommendation]) -> tuple[Player | None, dict[str, VsBaseline]]:
+    """Compare every candidate with the highest-projected one, using the paired
+    simulated drafts (same random seeds), so the split reflects the pick itself."""
+    if not recs:
+        return None, {}
+    base = max(recs, key=lambda r: r.player.proj_points)
+    out = {}
+    for r in recs:
+        diffs = [a - b for a, b in zip(r.values, base.values)]
+        if not diffs:
+            continue
+        up = [d for d in diffs if d > 0.5]
+        down = [d for d in diffs if d < -0.5]
+        out[r.player.id] = VsBaseline(
+            diff=mean(diffs), p_better=len(up) / len(diffs), avg_up=mean(up) if up else 0.0,
+            p_worse=len(down) / len(diffs), avg_down=mean(down) if down else 0.0)
+    return base.player, out
