@@ -28,7 +28,7 @@ from .io import apply_log, apply_manager, is_placeholder, league_managers, load_
 from .learn import fit_teams
 from .lineup import assign_lineup, over_targets, target_fill
 from .models import DraftState, Player, TeamProfile
-from .recommend import recommend, versus_highest_projection
+from .recommend import pick_gamble, recommend, versus_highest_projection
 from .room import RoomTracker
 from .simulate import availability, predict_picks
 
@@ -132,6 +132,13 @@ class Dashboard:
                      key=lambda p: p.proj_points, reverse=True)[:40]
         best = recs[0].exp_final_value if recs else 0.0
         baseline, vs = versus_highest_projection(recs)
+        gamble = pick_gamble(recs, vs, baseline)
+        if advice is not None:
+            g = vs.get(gamble.id) if gamble else None
+            advice["safe"] = baseline.name if baseline else None
+            advice["gamble"] = None if g is None else {
+                "name": gamble.name, "p_better": g.p_better, "avg_up": round(g.avg_up),
+                "p_worse": g.p_worse, "avg_down": round(g.avg_down), "diff": round(g.diff)}
 
         def vs_fields(r):
             v = vs.get(r.player.id)
@@ -152,6 +159,8 @@ class Dashboard:
                 "p_now": r.p_avail_now, "p_after": r.p_avail_after,
                 "value": round(r.exp_final_value), "vs_best": round(r.exp_final_value - best),
                 **vs_fields(r),
+                "tag": "safe" if baseline and r.player.id == baseline.id
+                       else "gamble" if gamble and r.player.id == gamble.id else None,
             } for r in recs],
             "available": [{
                 "id": p.id, "name": p.name, "pos": _pos(p), "team": p.nba_team,

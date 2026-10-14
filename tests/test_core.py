@@ -9,7 +9,7 @@ from fantasydraft.espn import EspnClient, parse_player
 from fantasydraft.io import load_players, load_state, parse_positions, resolve_player
 from fantasydraft.lineup import best_lineup, roster_value
 from fantasydraft.models import DraftState, League, Player, TeamProfile
-from fantasydraft.recommend import recommend
+from fantasydraft.recommend import Recommendation, recommend
 from fantasydraft.simulate import Simulator, availability
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -770,3 +770,16 @@ def test_versus_highest_projection_split():
     assert base.name == "Guard A" and vs["Guard A"].diff == 0
     c = vs["Center A"]
     assert c.diff >= 400 and c.p_better == 1.0 and c.p_worse == 0.0
+
+
+def test_gamble_is_a_favourable_coin_flip():
+    from fantasydraft.recommend import VsBaseline, pick_gamble
+
+    def R(name):
+        return Recommendation(Player(name, name, frozenset({"PG"}), 1000.0), 0, 1, 0, 0)
+    recs = [R("base"), R("flip"), R("bad"), R("tiny")]
+    vs = {"base": VsBaseline(0, 0, 0, 0, 0), "flip": VsBaseline(+20, 0.55, 150, 0.45, -140),
+          "bad": VsBaseline(-300, 0.10, 50, 0.90, -340), "tiny": VsBaseline(+5, 0.20, 40, 0.10, -30)}
+    assert pick_gamble(recs, vs, recs[0].player).name == "flip"
+    vs["flip"] = VsBaseline(-200, 0.45, 100, 0.55, -450)  # costs too much on average
+    assert pick_gamble(recs, vs, recs[0].player) is None

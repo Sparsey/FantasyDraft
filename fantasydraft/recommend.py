@@ -114,3 +114,19 @@ def versus_highest_projection(recs: list[Recommendation]) -> tuple[Player | None
             diff=mean(diffs), p_better=len(up) / len(diffs), avg_up=mean(up) if up else 0.0,
             p_worse=len(down) / len(diffs), avg_down=mean(down) if down else 0.0)
     return base.player, out
+
+
+def pick_gamble(recs: list[Recommendation], vs: dict[str, VsBaseline], baseline: Player | None,
+                min_better: float = 0.4, min_diff: float = -60.0) -> Player | None:
+    """The best alternative to the highest-projected pick that is a real coin flip
+    in your favour: taking it ends with a better final roster in at least
+    `min_better` of the simulated drafts, without costing more than `min_diff`
+    on average. None if nothing qualifies."""
+    if baseline is None:
+        return None
+    options = [r for r in recs if r.player.id != baseline.id and r.player.id in vs
+               and vs[r.player.id].p_better >= min_better and vs[r.player.id].diff >= min_diff]
+    if not options:
+        return None
+    best = max(options, key=lambda r: (vs[r.player.id].diff, vs[r.player.id].p_better))
+    return best.player

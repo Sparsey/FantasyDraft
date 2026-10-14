@@ -119,6 +119,9 @@
   .bar span { min-width: 34px; text-align: right; }
   td.up { color: var(--good); font-weight: 600; } td.dn { color: var(--bad); }
   td.risk { font-size: 12px; white-space: nowrap; }
+  .ptag { font-size: 10px; font-weight: 800; letter-spacing: .04em; border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
+  .ptag.safe { color: var(--good); background: var(--good-soft); border: 1px solid var(--good); }
+  .ptag.gamble { color: var(--warn); background: var(--warn-soft); border: 1px solid var(--warn); }
   .rk-up { color: var(--good); font-weight: 600; margin-right: 6px; } .rk-dn { color: var(--bad); font-weight: 600; margin-right: 6px; }
   .rk-up small, .rk-dn small { font-weight: 500; }
   .agr { font-size: 10.5px; font-weight: 600; color: var(--muted); margin-left: 4px; }
@@ -253,14 +256,24 @@ function renderAdvice(a) {
   if (!a) { box.hidden = true; return; }
   box.hidden = false;
   box.className = "advice " + a.kind;
+  const g = a.gamble;
+  const gl = g ? `<div style="margin-top:4px"><span class="ptag gamble" style="margin:0 6px 0 0">GAMBLE</span><b>${esc(g.name)}</b>:
+      ${pct(g.p_better)} chance of a better final roster (avg +${g.avg_up}), ${pct(g.p_worse)} worse (avg ${g.avg_down}).
+      Overall ${g.diff >= 0 ? "+" : ""}${g.diff}.</div>` : "";
   if (a.kind === "same") {
-    box.innerHTML = `Top pick at #${a.pick}: <b>${esc(a.top)}</b>, the highest-projected player you can get. Nothing special to weigh.`;
+    box.innerHTML = `<span class="ptag safe" style="margin:0 6px 0 0">SAFE</span>Top pick at #${a.pick}: <b>${esc(a.top)}</b>, the highest-projected player you can get.` + gl;
     return;
   }
   const head = a.kind === "close"
     ? `Close call at #${a.pick}: <b>${esc(a.top)}</b> (${a.top_proj.toLocaleString()}) edges out the highest-projected <b>${esc(a.best)}</b> (${a.best_proj.toLocaleString()}) by only ${a.gain} pts of final roster value. Either is fine.`
     : `Take <b>${esc(a.top)}</b> (${a.top_proj.toLocaleString()}) over the highest-projected <b>${esc(a.best)}</b> (${a.best_proj.toLocaleString()}) at #${a.pick}: about <b>+${a.gain}</b> pts for your final roster.`;
-  box.innerHTML = head + `<ul>${a.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`;
+  box.innerHTML = head + `<ul>${a.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` +
+    (g && g.name !== a.top ? gl : "");
+}
+function tagTxt(x) {
+  if (x.tag === "safe") return `<span class="ptag safe" title="Highest projected points available now">SAFE</span>`;
+  if (x.tag === "gamble") return `<span class="ptag gamble" title="Taking this player instead ends with a better final roster in many simulated drafts (see Better / worse)">GAMBLE</span>`;
+  return "";
 }
 function riskTxt(x) {
   if (x.p_better == null) return "–";
@@ -423,7 +436,7 @@ function renderTable(r) {
       <th class="num" title="Final roster value compared with taking the highest-projected player (averaged over simulated drafts)">vs top proj</th>
       <th title="Across the simulated drafts: how often taking this player ends with a better / worse roster than taking the highest-projected player, and by how much on average">Better / worse</th><th></th></tr></thead><tbody>` +
       r.recs.map((x, i) => `<tr class="${i === 0 ? "top" : ""}" title="Final roster value ${x.value.toLocaleString()}">
-        <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span></td>
+        <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span>${tagTxt(x)}</td>
         <td class="num muted">${x.rank ?? "–"}</td><td class="num">${x.proj}</td>${vsEspn(x)}
         <td class="num">${bar(x.p_now)}</td><td class="num">${bar(x.p_after)}</td>
         ${x.is_baseline ? `<td class="num muted">baseline</td><td class="muted" style="font-size:12px">highest projected</td>`
