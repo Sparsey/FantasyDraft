@@ -552,6 +552,28 @@ def cmd_review(args) -> None:
     print(review(state, picks.with_name(picks.stem + ".decisions.jsonl")))
 
 
+def _mock_files(args) -> tuple[Path, str]:
+    picks = Path(args.picks) if args.picks else max(Path("mocks").glob("mock-*.txt"),
+                                                     key=lambda p: p.stat().st_mtime, default=None)
+    if picks is None or not picks.exists():
+        sys.exit("no picks file given and none found in mocks/")
+    saved = picks.with_name(picks.stem + ".league.json")
+    return picks, args.league or (str(saved) if saved.exists() else "mock.json")
+
+
+def cmd_model_check(args) -> None:
+    """Does learning each team's habits improve the pick predictions?"""
+    from .modelcheck import check
+
+    picks, league = _mock_files(args)
+    from .io import load_log
+
+    state = load_state(args.players, league, picks)
+    entries = load_log(picks, state.players, state.league)
+    print(f"{picks} with {league}  (this takes a minute)\n")
+    print(check(state, entries, sims=args.sims))
+
+
 def cmd_room(args) -> None:
     """Follow an ESPN draft room through the browser userscript; write picks.txt live."""
     from .capture import serve
@@ -816,6 +838,13 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--league", help="league file (default: the one saved with the mock, else mock.json)")
     p.add_argument("--players", help=players_help)
     p.set_defaults(func=cmd_review)
+
+    p = sub.add_parser("model-check", help="after a draft: does learning each team's habits improve the predictions?")
+    p.add_argument("picks", nargs="?", help="picks file (default: the latest in mocks/)")
+    p.add_argument("--league", help="league file (default: the one saved with the mock, else mock.json)")
+    p.add_argument("--players", help=players_help)
+    p.add_argument("--sims", type=int, default=150)
+    p.set_defaults(func=cmd_model_check)
 
     p = sub.add_parser("room", help="follow an ESPN draft room live via the browser userscript (writes picks.txt)")
     files(p)

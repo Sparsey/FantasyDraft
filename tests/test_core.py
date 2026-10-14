@@ -1144,3 +1144,13 @@ def test_injury_cover_values_a_backup_at_a_position():
     with_backup = team_value(roster + [P("c2", "C", 1000)], lg) - team_value(roster, lg)
     with_guard = team_value(roster + [P("g3", "PG", 1000)], lg) - team_value(roster, lg)
     assert with_backup - with_guard == pytest.approx(0.12 * 2000)  # covers the C slot when c1 sits
+
+
+def test_model_check_runs_on_a_draft():
+    from fantasydraft.modelcheck import check
+
+    true = [TeamProfile("rank guy", "rank", 0.05)] + [TeamProfile(f"t{i}", "adp", 0.15) for i in range(9)]
+    players, picks = _simulated_draft(true, 30)
+    lg = League([TeamProfile(t.name, "unknown", 0.2) for t in true], 9)
+    text = check(DraftState(lg, players, picks), [("pick", p) for p in picks], sims=20)
+    assert "early" in text and "late" in text and "all" in text

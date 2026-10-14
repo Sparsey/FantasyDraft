@@ -62,7 +62,8 @@ def review(state: DraftState, decisions_path: str | Path | None = None) -> str:
                       key=lambda p: (p.room_points, p.proj_points), default=None)
         if cf_pick:
             cf.append(cf_pick)
-        line = (f"#{k + 1:>3} took {took.name} (mine {took.proj_points:,.0f} / ESPN {took.room_points:,.0f})")
+        pos = "/".join(sorted(took.positions))
+        line = (f"#{k + 1:>3} took {took.name} {pos} (mine {took.proj_points:,.0f} / ESPN {took.room_points:,.0f})")
         if espn and espn.id != took.id:
             nxt = mine[i + 1] if i + 1 < len(mine) else None
             if nxt is None:
@@ -90,6 +91,9 @@ def review(state: DraftState, decisions_path: str | Path | None = None) -> str:
         out.append(line)
 
     roster = [players[picks[k]] for k in mine]
+    counts = {pos: sum(pos in p.positions for p in roster) for pos in ("PG", "SG", "SF", "PF", "C")}
+    out += ["", "Your roster by position (players eligible): "
+                + "  ".join(f"{pos} {n}" for pos, n in counts.items())]
     by_espn = lambda r: [replace(p, proj_points=p.room_points) for p in r]  # noqa: E731
     mine_v, cf_v = team_value(roster, lg), team_value(cf, lg)
     mine_e, cf_e = team_value(by_espn(roster), lg), team_value(by_espn(cf), lg)
