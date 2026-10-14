@@ -1,78 +1,45 @@
 # Plan & status
 
-Your original overview, with what is built (✅), partly built (🟡), or still open (⬜),
-plus notes on the open questions.
+## Where things stand
 
-## Pre-draft
+| Area | Status |
+|---|---|
+| Player data | ✅ Google Sheet with an on-demand *Update players from ESPN* menu: ESPN projections (your league's scoring once activated), the draft room's own rankings (STANDARD/ROTO), ADP |
+| Extra projection sources | ✅ FantasyPros, Hashtag (free top 30), last season (Basketball-Reference, half weight, per game × projected games); consensus = your value, ESPN = the room's view |
+| Live draft feed | ✅ Tampermonkey userscript → `ui`/`room`: picks, autodraft on/off (incl. timeouts), team mapping, resync after rejoining |
+| Dashboard (`ui`) | ✅ Half-screen window: pick strip with likely picks, recommendations with "take X over Y" callout, vs-ESPN + source agreement, ESPN-underrates tab, lineup with position targets, teams with strategies, autodraft switches |
+| Opponent models | ✅ adp / rank / points / balanced / feel / auto / unknown; whose numbers they trust (ESPN / consensus / mix); favourite NBA team; position needs; noise and strategy learned from their picks |
+| People | ✅ `managers` profiles matched to teams by owner/team name; `history` fits each person from a past draft |
+| Evaluation | ✅ `benchmark` (auto vs points vs model on simulated drafts), `sources` report |
 
-- 🟡 **Load player draft data into a CSV (sheets-friendly)**
-  - `fetch-players` pulls ESPN's draft ranks, ADP and **projected fantasy points
-    under your league's own scoring** (`appliedTotal` on the league endpoint)
-    into `data/players.csv`. It is written against ESPN's undocumented API and
-    has **not yet been run against a live league** (the dev sandbox can't
-    reach ESPN), so run it once early and check the output. Use `--dump` to
-    save the raw JSON if something looks off.
-  - ✅ Or keep the list in a **Google Sheet** (`sheets/`): an on-demand
-    *Update players from ESPN* menu refreshes ESPN columns only, and your
-    `my_proj` / `ignore` / notes columns are left alone. The program reads
-    the sheet from its share link.
-  - The CSV is plain columns (`id,name,positions,nba_team,proj_points,espn_rank,adp`),
-    so you can round-trip it through Google Sheets, override projections, or
-    merge in other rankings.
-  - Other rankings: in a points league, projected points under *your* scoring
-    is what matters; other sites' ranks are mostly useful as a better ADP
-    signal for predicting opponents.
-- ✅ **Give players/teams a drafter type** — in `league.json`, each team gets a
-  `strategy` (`auto`, `adp`, `rank`, `points`), a `noise` level, and
-  `favorites` (players they'll reach for, in draft spots).
-- ✅ **Test that live update + UI work** — `mock` writes a simulated draft into
-  `picks.txt` pick by pick while `watch` re-renders recommendations, so you
-  can rehearse the whole loop without ESPN.
+## What we learned
 
-## Live draft
+- ESPN's STANDARD rank is exactly ESPN's projection order, so autodrafters and
+  board-followers draft by ESPN's projected points. Edge over the room comes
+  from **knowing more than ESPN's numbers** (the consensus) and **knowing the
+  people**, not from cleverer simulation.
+- In a points league with flexible lineups, "best projected player" is right
+  most of the time; position drop-offs (VONA) matter occasionally. The
+  dashboard calls those moments out.
+- Benchmarks score rosters with the consensus itself, so they show what the
+  edge is worth *if* the consensus is right, not whether it is.
 
-- 🟡 **Live update teams, snake order, who's on autodraft** — `live` polls
-  ESPN's `mDraftDetail` view and mirrors picks into `picks.txt`; it reports
-  which teams had picks flagged `autoDraftTypeId != 0`. Snake order is
-  computed from `league.json` (`fetch-league` fills team order and roster
-  slots from ESPN). Untested against a live draft; manual entry into
-  `picks.txt` is the fallback.
-- ✅ **Monte Carlo odds a player is available at my next pick** —
-  `availability`, and the `avail@my pick` / `avail@pick after` columns.
-  - ⬜ *Which ranking does ESPN autodraft use?* As far as I know: the team's
-    queue first, then ESPN's default draft ranking (`draftRanksByRankType` —
-    STANDARD, or a points-specific list if your league exposes one), with
-    some roster-position limits. Not verified. **Test it**: create a mock
-    draft lobby on ESPN with autodraft bots, then run `analyze` on the result
-    — an autodrafter shows ~100% in "took top ESPN rank". If it follows a
-    different list, fetch that list with `--rank-type` and use it as `espn_rank`.
-- ✅ **"Would simple odds × points work?"** — It's a reasonable first
-  approximation, but it ignores *opportunity cost* (what you'd take instead)
-  and *positional scarcity*. What's implemented instead: for each candidate,
-  simulate the **entire rest of the draft** many times (opponents by their
-  profiles, your later picks by a greedy roster-fit policy) and compare your
-  **expected final roster value**. All candidates share the same random seeds
-  so differences come from the pick, not noise. This subsumes odds × points and
-  relative/positional value.
-- ✅ **Value to my team given positions** — roster value = optimal starting
-  lineup (exact slot matching incl. G/F/UTIL) + `bench_weight` × bench. The
-  "gain now" column is the immediate lineup improvement; "E[final team]" is
-  the forward-looking version.
-- 🟡 **Analyse other teams' strategies** — `analyze` reports, per team, how
-  often they took the top ESPN-ranked or top-projected player, and how far
-  they reach versus ADP and ESPN rank, with a suggested strategy. Not yet
-  fed back automatically into `league.json` — update it by hand mid-draft
-  (`watch` picks up the change).
-  - ⬜ Save a summary after each draft to build per-manager history for next year.
+## To do before the draft
 
-## Ideas / next steps
+1. **League activation:** run `fetch-league` (draft order, roster slots,
+   owners, *scoring*), click *Update* in the sheet, rerun `sources` and check
+   "median vs ESPN" ≈ 1.00.
+2. **History:** `history --league-id 358709800 --season 2026 --me "Aaron Solomon" --write league.json`
+   to seed everyone's profile from last year's draft.
+3. **Dress rehearsal:** one full ESPN mock with `ui` from pick 1, with a page
+   reload and an autodraft toggle.
+4. Hand-set `my_proj` for players you have strong views on (injury-prone
+   stars, rookies).
 
-- Validate the ESPN client against your real league (league id, season, cookies).
-- Calibrate `noise` per strategy from past drafts (ESPN keeps prior seasons'
-  draft results; the same `mDraftDetail` view works with an older `--season`).
-- Better "my future picks" policy in simulations (currently greedy on
-  immediate lineup gain; could use lookahead or a value-over-replacement rule).
-- Games-played / schedule awareness: in H2H points with daily lineups, bench
-  value depends on how often starters sit; `bench_weight` is a crude stand-in.
-- Optional richer UI (e.g. a small web page or Google Sheets sync) on top of
-  the same engine.
+## Ideas, lower priority
+
+- ESPN position limits (e.g. max 4 C), counted by each player's primary
+  position (needs a primary-position column from ESPN).
+- Late-round upside from source disagreement.
+- Backtest the consensus vs ESPN alone on last season's actual results.
+- In-season tools (streaming for games played), reusing the sheet and sources.
