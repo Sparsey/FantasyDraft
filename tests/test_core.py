@@ -599,3 +599,25 @@ def test_percentage_only_source_no_longer_rescaled(tmp_path):
     # Same points, but the efficient big gains from the FGM/FGA scoring and the volume guard loses.
     big_shooting = 2 * 0.62 - 1  # per FGA
     assert big_shooting > 0 and vals_b > vals_g
+
+
+def test_dashboard_advice_explains_skipping_highest_projection():
+    from fantasydraft.ui import Dashboard
+
+    def Q(n, pos, pts, rank):
+        return Player(n, n, frozenset(pos.split("/")), float(pts), float(rank), float(rank))
+
+    pl = [Q("Filler 0", "SF", 900, 1), Q("Guard A", "PG", 3000, 2), Q("Center A", "C", 2000, 3),
+          Q("Filler 1", "SF", 800, 4), Q("Filler 2", "SF", 790, 5), Q("Filler 3", "SF", 780, 6),
+          Q("Guard B", "PG", 2500, 7), Q("Center B", "C", 1000, 8)] + [Q(f"f{i}", "SF", 300 - i, 9 + i) for i in range(12)]
+    players = {p.id: p for p in pl}
+    teams = [TeamProfile("Opp1", "auto"), TeamProfile("Me", "adp"), TeamProfile("Opp2", "auto"), TeamProfile("Opp3", "auto")]
+    lg = League(teams, 1, roster_slots={"PG": 1, "C": 1, "BE": 2}, balance_penalty=0)
+    st = DraftState(lg, players, ["Filler 0"])
+    from fantasydraft.simulate import availability
+
+    recs = recommend(st, candidates=4, sims=5)
+    advice = Dashboard._advice(st, recs, availability(st, sims=20))
+    assert advice["kind"] == "different"
+    assert advice["top"] == "Center A" and advice["best"] == "Guard A" and advice["gain"] >= 400
+    assert any("Guard B" in r and "Center B" in r for r in advice["reasons"]), advice["reasons"]

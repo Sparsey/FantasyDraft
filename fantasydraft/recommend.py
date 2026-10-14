@@ -30,6 +30,8 @@ def candidate_pool(state: DraftState, k: int, exclude: set[str] = frozenset()) -
     by_gain = sorted(avail, key=lambda p: (gains[p.id], p.proj_points), reverse=True)
 
     picked: dict[str, Player] = {p.id: p for p in by_gain[:k]}
+    if avail:  # always compare against the highest-projected player you can get
+        picked.setdefault(avail[0].id, avail[0])
     for pos in POSITIONS:
         best = next((p for p in by_gain if pos in p.positions), None)
         if best is not None:

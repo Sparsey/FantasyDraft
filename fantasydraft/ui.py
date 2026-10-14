@@ -26,7 +26,7 @@ from .analyze import analyze
 from .drafters import add_to_counts, full_positions
 from .io import apply_log, is_placeholder, load_state
 from .learn import fit_teams
-from .lineup import assign_lineup, target_fill
+from .lineup import assign_lineup, over_targets, target_fill
 from .models import DraftState, Player, TeamProfile
 from .recommend import recommend
 from .room import RoomTracker
@@ -37,6 +37,15 @@ PAGE = Path(__file__).parent / "web" / "index.html"
 
 def _pos(p: Player) -> str:
     return "/".join(sorted(p.positions))
+
+
+def _agree(p: Player) -> list[int] | None:
+    """[sources on the same side of ESPN as the consensus, other sources]."""
+    others = [v for n, v in p.sources if n != "ESPN"]
+    if not others:
+        return None
+    side = 1 if p.proj_points >= p.room_points else -1
+    return [sum((v - p.room_points) * side > 0 for v in others), len(others)]
 
 
 def _num(x: float) -> float | None:
@@ -117,16 +126,18 @@ class Dashboard:
             return {"recs": [], "available": []}
         recs = recommend(st, candidates=self.candidates, sims=self.sims)
         probs = availability(st, sims=max(self.sims * 2, 100))
+        advice = self._advice(st, recs, probs)
         top = sorted((p for p in st.available() if not is_placeholder(p)),
                      key=lambda p: p.proj_points, reverse=True)[:40]
         best = recs[0].exp_final_value if recs else 0.0
         return {
+            "advice": advice,
             "recs": [{
                 "id": r.player.id, "name": r.player.name, "pos": _pos(r.player),
                 "team": r.player.nba_team, "proj": round(r.player.proj_points),
                 "rank": _num(r.player.espn_rank), "gain": round(r.marginal_now),
                 "vs_espn": round(r.player.proj_points - r.player.room_points),
-                "sources": [[n, round(v)] for n, v in r.player.sources],
+                "sources": [[n, round(v)] for n, v in r.player.sources], "agree": _agree(r.player),
                 "p_now": r.p_avail_now, "p_after": r.p_avail_after,
                 "value": round(r.exp_final_value), "vs_best": round(r.exp_final_value - best),
             } for r in recs],
@@ -134,12 +145,65 @@ class Dashboard:
                 "id": p.id, "name": p.name, "pos": _pos(p), "team": p.nba_team,
                 "proj": round(p.proj_points), "rank": _num(p.espn_rank), "adp": _num(p.adp),
                 "vs_espn": round(p.proj_points - p.room_points), "spread": round(p.spread),
-                "sources": [[n, round(v)] for n, v in p.sources],
+                "sources": [[n, round(v)] for n, v in p.sources], "agree": _agree(p),
                 "p": probs.get(p.id, [])[:3],
             } for p in top],
             "underrated": self._underrated(st, probs),
             "has_sources": any(len(p.sources) > 1 for p in st.players.values()),
         }
+
+    @staticmethod
+    def _advice(st: DraftState, recs, probs: dict | None = None) -> dict | None:
+        """Plain-language note on whether to take the highest-projected player."""
+        if not recs:
+            return None
+        top = recs[0]
+        best = max(recs, key=lambda r: r.player.proj_points)
+        mine = st.my_next_picks()
+        on_clock = mine[0] == st.current_pick
+        now_pick = mine[0] + 1
+        later = mine[1] + 1 if len(mine) > 1 else None
+        if best.player.id == top.player.id:
+            return {"kind": "same", "top": top.player.name, "pick": now_pick}
+        gain = round(top.exp_final_value - best.exp_final_value)
+        reasons = []
+        if later and best.p_avail_after - top.p_avail_after >= 0.2:
+            reasons.append(f"{best.player.name} is {best.p_avail_after:.0%} likely to still be there at "
+                           f"#{later}; {top.player.name} only {top.p_avail_after:.0%}")
+        if later and probs:
+            # Position drop-off (value over next available): who is likely left later
+            # at each player's position if you take the other one now.
+            def likely_left(player, skip):
+                pool = [q for q in st.available() if q.id not in skip and q.positions & player.positions
+                        and len(probs.get(q.id, [])) > 1 and probs[q.id][1] >= 0.5]
+                return max(pool, key=lambda q: q.proj_points, default=None)
+
+            skip = {top.player.id, best.player.id}
+            alt_best, alt_top = likely_left(best.player, skip), likely_left(top.player, skip)
+            if alt_best and alt_top:
+                drop_best = best.player.proj_points - alt_best.proj_points
+                drop_top = top.player.proj_points - alt_top.proj_points
+                if drop_top > drop_best + 100:
+                    pos_b = "/".join(sorted(best.player.positions))
+                    pos_t = "/".join(sorted(top.player.positions))
+                    reasons.append(f"{pos_b} stays deep: {alt_best.name} ({alt_best.proj_points:,.0f}) should still be "
+                                   f"there at #{later}. At {pos_t} the drop is steep: after {top.player.name} the best "
+                                   f"likely left is {alt_top.name} ({alt_top.proj_points:,.0f})")
+        roster = st.rosters()[st.league.my_slot]
+        if best.player in over_targets(roster + [best.player], st.league):
+            pos = "/".join(sorted(best.player.positions))
+            reasons.append(f"{best.player.name} would be over your {pos} target")
+        elif top.marginal_now > best.marginal_now + 1:
+            reasons.append(f"{top.player.name} adds more to your lineup now "
+                           f"(+{top.marginal_now:.0f} vs +{best.marginal_now:.0f})")
+        if not on_clock and best.p_avail_now < 0.5:
+            reasons.append(f"{best.player.name} is only {best.p_avail_now:.0%} likely to reach #{now_pick}")
+        if not reasons:
+            reasons.append("the simulated drafts favour it (timing and roster fit)")
+        return {"kind": "close" if gain < 40 else "different", "top": top.player.name,
+                "best": best.player.name, "best_proj": round(best.player.proj_points),
+                "top_proj": round(top.player.proj_points), "gain": gain, "reasons": reasons,
+                "pick": now_pick}
 
     def _underrated(self, st: DraftState, probs: dict) -> list[dict]:
         """Available players the consensus ranks well above ESPN (the room's view)."""
@@ -155,6 +219,7 @@ class Dashboard:
             "proj": round(p.proj_points), "espn": round(p.room_points), "my_rank": mine[p.id],
             "espn_rank": room[p.id], "spread": round(p.spread),
             "sources": [[n, round(v)] for n, v in p.sources], "p": probs.get(p.id, [])[:3],
+            "agree": _agree(p),
         } for p in rows[:25]]
 
     def snapshot(self) -> dict:

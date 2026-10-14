@@ -118,6 +118,13 @@
   .bar.hi i b { background: var(--good); } .bar.lo i b { background: var(--bad); }
   .bar span { min-width: 34px; text-align: right; }
   td.up { color: var(--good); font-weight: 600; } td.dn { color: var(--bad); }
+  .agr { font-size: 10.5px; font-weight: 600; color: var(--muted); margin-left: 4px; }
+  .advice { margin: 8px 10px 4px; padding: 8px 11px; border-radius: 8px; font-size: 13px; line-height: 1.45;
+            background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+  .advice.different { background: var(--warn-soft); color: var(--ink); border-color: var(--warn); box-shadow: inset 4px 0 0 var(--warn); }
+  .advice.close { background: var(--accent-soft); color: var(--ink); border-color: var(--accent); }
+  .advice b { color: var(--ink); }
+  .advice ul { margin: 4px 0 0; padding-left: 18px; }
   .add { padding: 0 7px; font-size: 12px; color: var(--muted); }
   .suggest { padding: 7px 12px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
   .suggest b { color: var(--ink); }
@@ -192,6 +199,7 @@
       <div class="tabs"><button class="on" data-tab="recs">Recommendations</button><button data-tab="avail">Best available</button><button data-tab="under" id="undertab" hidden>ESPN underrates</button></div>
       <span class="spin" id="spin"></span>
     </div>
+    <div class="advice" id="advice" hidden></div>
     <div class="tbl" id="tablebody"></div>
     <div class="suggest" id="suggest" hidden></div>
   </section>
@@ -231,11 +239,26 @@ function bar(p) {
   const cls = p >= 0.7 ? "hi" : p <= 0.3 ? "lo" : "";
   return `<span class="bar ${cls}"><i><b style="width:${Math.round(p * 100)}%"></b></i><span>${pct(p)}</span></span>`;
 }
+const agreeTxt = (a) => a ? `<span class="agr" title="${a[0]} of ${a[1]} other sources are on this side of ESPN">${a[0]}/${a[1]}</span>` : "";
 const vsEspn = (x) => {
   if (x.vs_espn == null || !x.sources || x.sources.length < 2) return '<td class="num muted">–</td>';
   const t = x.sources.map(([n, v]) => n + " " + v.toLocaleString()).join(" · ");
-  return `<td class="num ${x.vs_espn > 0 ? "up" : x.vs_espn < 0 ? "dn" : "muted"}" title="${esc(t)}">${x.vs_espn > 0 ? "+" : ""}${x.vs_espn}</td>`;
+  return `<td class="num ${x.vs_espn > 0 ? "up" : x.vs_espn < 0 ? "dn" : "muted"}" title="${esc(t)}">${x.vs_espn > 0 ? "+" : ""}${x.vs_espn}${agreeTxt(x.agree)}</td>`;
 };
+function renderAdvice(a) {
+  const box = $("advice");
+  if (!a) { box.hidden = true; return; }
+  box.hidden = false;
+  box.className = "advice " + a.kind;
+  if (a.kind === "same") {
+    box.innerHTML = `Top pick at #${a.pick}: <b>${esc(a.top)}</b>, the highest-projected player you can get. Nothing special to weigh.`;
+    return;
+  }
+  const head = a.kind === "close"
+    ? `Close call at #${a.pick}: <b>${esc(a.top)}</b> (${a.top_proj.toLocaleString()}) edges out the highest-projected <b>${esc(a.best)}</b> (${a.best_proj.toLocaleString()}) by only ${a.gain} pts of final roster value. Either is fine.`
+    : `Take <b>${esc(a.top)}</b> (${a.top_proj.toLocaleString()}) over the highest-projected <b>${esc(a.best)}</b> (${a.best_proj.toLocaleString()}) at #${a.pick}: about <b>+${a.gain}</b> pts for your final roster.`;
+  box.innerHTML = head + `<ul>${a.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`;
+}
 const addBtn = (id) => `<button class="add" data-pick="${esc(id)}" title="Record as the next pick">+</button>`;
 
 async function api(path, body) {
@@ -278,6 +301,7 @@ function render() {
   $("undertab").hidden = !r.has_sources;
   $("spin").textContent = S.computing ? "updating…" : r.error || "";
   renderTable(r);
+  renderAdvice(r.advice);
   const sg = $("suggest");
   sg.hidden = !S.suggestion;
   if (S.suggestion) sg.innerHTML = `ESPN would autopick for you: <b>${esc(S.suggestion.name)}</b><span class="pos">${esc(S.suggestion.pos)}</span>`;
@@ -394,7 +418,7 @@ function renderTable(r) {
       mine.map((m) => `<th class="num">At #${m}</th>`).join("") + `<th></th></tr></thead><tbody>` +
       U.map((x) => `<tr title="${esc(x.sources.map(([n, v]) => n + " " + v.toLocaleString()).join(" · "))}">
         <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span></td>
-        <td class="num"><b>${x.my_rank}</b></td><td class="num muted">${x.espn_rank}</td><td class="num">${x.proj}</td>
+        <td class="num"><b>${x.my_rank}</b></td><td class="num muted">${x.espn_rank}</td><td class="num">${x.proj}${agreeTxt(x.agree)}</td>
         <td class="num muted">${x.espn}</td><td class="num muted">${x.spread}</td>` +
         mine.map((_, k) => `<td class="num">${bar(x.p[k])}</td>`).join("") + `<td>${addBtn(x.id)}</td></tr>`).join("") + `</tbody></table>`;
   } else {
