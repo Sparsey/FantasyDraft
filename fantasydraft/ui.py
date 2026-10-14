@@ -29,7 +29,7 @@ from .io import apply_log, apply_manager, is_placeholder, league_managers, load_
 from .learn import fit_teams
 from .lineup import over_targets, target_fill
 from .models import DraftState, Player, TeamProfile
-from .recommend import availability_sims, pick_gamble, recommend, versus_highest_projection
+from .recommend import MIN_AVAIL, availability_sims, pick_gamble, recommend, versus_highest_projection
 from .room import RoomTracker
 from .simulate import availability, predict_picks
 
@@ -67,6 +67,7 @@ class Dashboard:
         self.lock = threading.RLock()
         self.wake = threading.Condition(self.lock)
         self.result: dict = {"version": -1}
+        self.done_version = -1  # last version fully computed
         self.computing = False
         self.predictions: list[dict] = []
         self.pred_history: dict[int, dict[str, float]] = {}  # pick -> {player: P} predicted beforehand
@@ -87,24 +88,47 @@ class Dashboard:
         with self.wake:
             self.wake.notify_all()
 
+    def _publish(self, version: int, result: dict, stage: str) -> bool:
+        """Show a result; False if a newer pick came in meanwhile (start over)."""
+        with self.lock:
+            if self.tracker.version != version:
+                return False
+            result.update(version=version, stage=stage)
+            self.result = result
+            return True
+
     def _worker(self) -> None:
+        """After each change, in stages so the important part shows at once:
+        1. instantly: who's available, ESPN vs your projections;
+        2. ~1 s: chances each lasts to your pick, SAFE, the pick strip;
+        3. then: the full comparison (vs SAFE, GAMBLE, advice)."""
         while True:
             with self.wake:
-                while self.result["version"] == self.tracker.version:
+                while self.done_version == self.tracker.version:
                     self.wake.wait(timeout=5)
                 version = self.tracker.version
                 st = self.state()
                 self.computing = True
             try:
-                result = self._compute(st)
+                if not self._publish(version, self._quick(st), "quick"):
+                    continue
+                probs = None
+                if not st.is_complete and st.my_next_picks():
+                    probs = availability(st, sims=availability_sims(self.sims), seed=1)
+                    if not self._publish(version, self._quick(st, probs), "chances"):
+                        continue
+                self._predict(st)
+                if self.tracker.version != version:
+                    continue
+                result = self._compute(st, probs)
             except Exception:
                 traceback.print_exc()
                 result = {"error": "recommendation failed — see terminal"}
+            if not self._publish(version, result, "full"):
+                continue
             with self.lock:
                 self.computing = False
-                result["version"] = version
-                self.result = result
-            self._predict(st)
+                self.done_version = version
             try:
                 rows = self._compute_tendencies(st)
                 with self.lock:
@@ -129,16 +153,49 @@ class Dashboard:
             for row in preds:
                 self.pred_history[row["pick"]] = dict(list(row["probs"].items())[:15])
 
-    def _compute(self, st: DraftState) -> dict:
+    def _quick(self, st: DraftState, probs: dict | None = None) -> dict:
+        """The fast part: top available players by your numbers (plus ESPN's top),
+        and, once `probs` is known, their chances and the SAFE pick."""
         if st.is_complete or not st.my_next_picks():
-            return {"recs": [], "available": []}
+            return {"recs": []}
+        on_clock = st.my_next_picks()[0] == st.current_pick
+        avail = [p for p in st.available() if not is_placeholder(p)]
+        if probs is not None and not on_clock:  # same cut as the recommendations
+            avail = [p for p in avail if (probs.get(p.id) or [0])[0] >= MIN_AVAIL] or avail
+        shown = sorted(avail, key=lambda p: p.proj_points, reverse=True)[:self.candidates + 2]
+        espn_top = max(avail, key=lambda p: (p.room_points, p.proj_points), default=None)
+        if espn_top is not None and espn_top not in shown:
+            shown.append(espn_top)
+        rows = []
+        for p in shown:
+            pr = (probs or {}).get(p.id, [])
+            rows.append({**self._player_fields(p),
+                         "p_now": 1.0 if on_clock else (pr[0] if pr else None) if probs is not None else None,
+                         "p_after": (pr[1] if len(pr) > 1 else 0.0) if probs is not None else None,
+                         "tag": "safe" if probs is not None and p is espn_top else None,
+                         "is_baseline": probs is not None and p is espn_top})
+        return {"recs": rows, "advice": None, "has_sources": self._has_sources(st),
+                "underrated": self._underrated(st, probs or {})}
+
+    @staticmethod
+    def _player_fields(p: Player) -> dict:
+        return {"id": p.id, "name": p.name, "pos": _pos(p), "team": p.nba_team,
+                "proj": round(p.proj_points), "espn": round(p.room_points),
+                "vs_espn": round(p.proj_points - p.room_points),
+                "sources": [[n, round(v)] for n, v in p.sources], "agree": _agree(p)}
+
+    @staticmethod
+    def _has_sources(st: DraftState) -> bool:
+        return any(len(p.sources) > 1 for p in st.players.values())
+
+    def _compute(self, st: DraftState, probs: dict | None = None) -> dict:
+        if st.is_complete or not st.my_next_picks():
+            return {"recs": []}
         # One availability run, shared by the recommendations and the advice.
-        probs = availability(st, sims=availability_sims(self.sims), seed=1)
+        if probs is None:
+            probs = availability(st, sims=availability_sims(self.sims), seed=1)
         recs = recommend(st, candidates=self.candidates, sims=self.sims, avail=probs)
         advice = self._advice(st, recs, probs)
-        top = sorted((p for p in st.available() if not is_placeholder(p)),
-                     key=lambda p: p.proj_points, reverse=True)[:40]
-        best = recs[0].exp_final_value if recs else 0.0
         baseline, vs = versus_highest_projection(recs)
         gamble = pick_gamble(recs, vs, baseline)
         if advice is not None:
@@ -159,27 +216,15 @@ class Dashboard:
         return {
             "advice": advice,
             "recs": [{
-                "id": r.player.id, "name": r.player.name, "pos": _pos(r.player),
-                "team": r.player.nba_team, "proj": round(r.player.proj_points),
-                "rank": _num(r.player.espn_rank), "gain": round(r.marginal_now),
-                "vs_espn": round(r.player.proj_points - r.player.room_points),
-                "espn": round(r.player.room_points),
-                "sources": [[n, round(v)] for n, v in r.player.sources], "agree": _agree(r.player),
+                **self._player_fields(r.player),
                 "p_now": r.p_avail_now, "p_after": r.p_avail_after,
-                "value": round(r.exp_final_value), "vs_best": round(r.exp_final_value - best),
+                "value": round(r.exp_final_value),
                 **vs_fields(r),
                 "tag": "safe" if baseline and r.player.id == baseline.id
                        else "gamble" if gamble and r.player.id == gamble.id else None,
             } for r in recs],
-            "available": [{
-                "id": p.id, "name": p.name, "pos": _pos(p), "team": p.nba_team,
-                "proj": round(p.proj_points), "rank": _num(p.espn_rank), "adp": _num(p.adp),
-                "vs_espn": round(p.proj_points - p.room_points), "spread": round(p.spread),
-                "sources": [[n, round(v)] for n, v in p.sources], "agree": _agree(p),
-                "p": probs.get(p.id, [])[:3],
-            } for p in top],
             "underrated": self._underrated(st, probs),
-            "has_sources": any(len(p.sources) > 1 for p in st.players.values()),
+            "has_sources": self._has_sources(st),
         }
 
     @staticmethod
@@ -335,7 +380,8 @@ class Dashboard:
                          "p": None if pred is None or slot == lg.my_slot else pred.get(pid, 0.0),
                          "guess": None if guess is None else {**brief(guess[0]), "p": guess[1]}})
         upcoming = []
-        top_rec = (result.get("recs") or [None])[0]  # already without anyone just drafted
+        # The top recommendation once the full comparison is in (already without anyone just drafted).
+        top_rec = (result.get("recs") or [None])[0] if result.get("stage") == "full" else None
         taken = set(st.picks)
         for row in self.predictions:
             if row["pick"] < pick:

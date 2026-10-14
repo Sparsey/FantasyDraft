@@ -37,6 +37,7 @@ class Simulator:
             self.learned = {t: max(opts, key=lambda o: o[0])[1] for t, opts in self.mixes.items()}
         self.league = state.league
         self.slots = self.league.starting_slots
+        self._values: dict[frozenset, float] = {}  # my roster (player ids) -> team_value
         strategies = ("auto", "adp", "rank", "points", "points@consensus", "points@mix")
         players = list(state.players.values())
         self.orders = {s: order_for(s, players) for s in strategies}
@@ -114,11 +115,20 @@ class Simulator:
             need -= p.positions
             if i >= MY_POLICY_TOP_N and not need:
                 break
-        base = team_value(roster, self.league)
+        # Rosters repeat a lot across simulated drafts (same random draws for
+        # every candidate), so their values are cached.
+        ids = frozenset(p.id for p in roster)
+        base = self._value(ids, roster)
         return max(
             candidates.values(),
-            key=lambda p: (team_value(roster + [p], self.league) - base, p.proj_points),
+            key=lambda p: (self._value(ids | {p.id}, roster + [p]) - base, p.proj_points),
         )
+
+    def _value(self, ids: frozenset, roster: list[Player]) -> float:
+        v = self._values.get(ids)
+        if v is None:
+            v = self._values[ids] = team_value(roster, self.league)
+        return v
 
     def run(self, rng: random.Random, my_next: Player | None = None, i_pick: bool = True,
             until: int | None = None) -> SimResult:

@@ -226,8 +226,14 @@ const projCells = (x) => {
   return `<td class="num muted">${x.espn != null ? x.espn.toLocaleString() : "–"}</td>
     <td class="num"><b>${x.proj.toLocaleString()}</b></td><td class="num" title="${esc(t)}">${pill}</td>`;
 };
-function renderAdvice(a) {
+function renderAdvice(a, r) {
   const box = $("advice");
+  if (!a && r && r.stage && r.stage !== "full" && (r.recs || []).length) {
+    box.hidden = false; box.className = "advice";
+    box.innerHTML = r.stage === "quick" ? "Available players by your projections. Chances of lasting to your pick in a moment…"
+      : "Comparing the options over simulated drafts (vs SAFE, GAMBLE)…";
+    return;
+  }
   if (!a) { box.hidden = true; return; }
   box.hidden = false;
   box.className = "advice " + a.kind;
@@ -311,11 +317,12 @@ function render() {
   renderStrip();
   const r = S.result || {};
   $("undertab").hidden = !r.has_sources;
-  $("spin").textContent = S.computing ? "updating…" : r.error || "";
+  $("spin").textContent = r.error || (!S.computing ? "" : r.stage === "quick" ? "working out chances…"
+    : r.stage === "chances" ? "comparing picks…" : "updating…");
   $("tablebody").style.opacity = r.stale ? "0.55" : "";
   const tkey = JSON.stringify([tab, r, manual(), S.status.my_picks]);
   if (tkey !== tableKey) { tableKey = tkey; renderTable(r); }
-  renderAdvice(r.advice);
+  renderAdvice(r.advice, r);
 
   // Re-render the slower-changing panels only when their data changed (keeps selects/scroll stable).
   const key = JSON.stringify([S.version, S.teams, S.positions, S.strip.accuracy]);
@@ -417,12 +424,12 @@ function renderTable(r) {
       <th class="num" title="Chance the player lasts to the pick after that, if you pass">Lasts</th>
       <th class="num" title="Final roster value (by your consensus numbers) compared with taking ESPN's top-projected player, the SAFE pick (averaged over simulated drafts)">vs SAFE</th>
       ${manual() ? "<th></th>" : ""}</tr></thead><tbody>` +
-      r.recs.map((x, i) => `<tr class="${i === 0 ? "top" : ""}" title="Final roster value ${x.value.toLocaleString()}">
+      r.recs.map((x, i) => `<tr class="${i === 0 && r.stage === "full" ? "top" : ""}" ${x.value != null ? `title="Final roster value ${x.value.toLocaleString()}"` : ""}>
         <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span>${tagTxt(x)}</td>
         ${r.has_sources ? projCells(x) : `<td class="num">${x.proj.toLocaleString()}</td>`}
         <td class="num">${bar(x.p_now)}</td><td class="num">${bar(x.p_after)}</td>
         ${x.is_baseline ? `<td class="num muted">SAFE</td>`
-          : `<td class="num ${x.vs_top > 0 ? "up" : x.vs_top < 0 ? "dn" : "muted"}" title="${esc(riskTip(x))}">${x.vs_top == null ? "–" : (x.vs_top > 0 ? "+" : "") + x.vs_top}</td>`}
+          : `<td class="num ${x.vs_top > 0 ? "up" : x.vs_top < 0 ? "dn" : "muted"}" title="${esc(riskTip(x))}">${x.vs_top == null ? (r.stage === "full" ? "–" : "…") : (x.vs_top > 0 ? "+" : "") + x.vs_top}</td>`}
         ${manual() ? `<td>${addBtn(x.id)}</td>` : ""}</tr>`).join("") + `</tbody></table>`;
   } else if (tab === "under") {
     const U = r.underrated || [];
