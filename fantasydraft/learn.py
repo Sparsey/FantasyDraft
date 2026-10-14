@@ -165,17 +165,25 @@ def fit_teams(state: DraftState) -> dict[int, TeamFit]:
         key = profile.strategy
         if key in ("points", "balanced") and profile.view != "espn":
             key = f"{key}@{profile.view}"
-        saved = key if key in fit else max(fit, key=fit.get)
+        if key in fit or profile.strategy == "unknown":
+            saved = key if key in fit else max(fit, key=fit.get)
+            noise_key = saved
+        else:
+            # A saved strategy we don't fit directly (e.g. points@mix): keep it,
+            # learning its randomness from the nearest one we do fit.
+            saved = key
+            base = key.partition("@")[0]
+            noise_key = base if base in fit else max(fit, key=fit.get)
 
         def noise_for(s: str) -> float:  # posterior mean in log space (noise is a scale)
             return round(math.exp(sum(w * math.log(x) for w, x in zip(posts[s], NOISE_GRID))), 3)
-        if key in fit:
-            mix = {saved: (1.0, noise_for(saved))}
+        if profile.strategy != "unknown":
+            mix = {saved: (1.0, noise_for(noise_key))}
         else:
             kept = {s: p for s, p in fit.items() if p >= MIX_FLOOR}
             total = sum(kept.values())
             mix = {s: (p / total, noise_for(s)) for s, p in sorted(kept.items(), key=lambda kv: -kv[1])}
-        out[team] = TeamFit(len(rows), saved, noise_for(saved), prior_noise, fit, mix)
+        out[team] = TeamFit(len(rows), saved, noise_for(noise_key), prior_noise, fit, mix)
     return out
 
 
@@ -193,7 +201,7 @@ def learned_mixes(state: DraftState, fits: dict[int, TeamFit] | None = None
         options = []
         for s, (p, noise) in f.mix.items():
             strategy, _, view = s.partition("@")
-            options.append((p, replace(profile, strategy=strategy, view=view or profile.view,
+            options.append((p, replace(profile, strategy=strategy, view=view or "espn",
                                        noise=noise if state.league.learn_noise else profile.noise)))
         out[team] = options
     return out
@@ -209,5 +217,5 @@ def learned_profiles(state: DraftState) -> dict[int, TeamProfile]:
         if profile.strategy != "auto":
             noise = f.noise if state.league.learn_noise else profile.noise
             strategy, _, view = f.strategy.partition("@")
-            out[team] = replace(profile, strategy=strategy, view=view or profile.view, noise=noise)
+            out[team] = replace(profile, strategy=strategy, view=view or "espn", noise=noise)
     return out

@@ -25,6 +25,7 @@ import csv
 import io as _io
 import math
 import re
+import sys
 from html.parser import HTMLParser
 from dataclasses import dataclass, field, replace
 from statistics import mean, pstdev
@@ -64,7 +65,8 @@ def _key(header: str) -> str | None:
         return h + "M"
     if h in ("FG%", "FT%"):
         return h
-    h = h.replace("%", "")
+    if "%" in h:  # 3P%, TOV%, TRB%... are rates, not the counting stats
+        return None
     for key, names in _HEADERS.items():
         if h in names:
             return key
@@ -287,8 +289,13 @@ def apply_sources(players: dict[str, Player], sources: dict[str, object],
     configs = {name: source_config(v) for name, v in sources.items()}
     loaded: dict[str, list[tuple[str, SourceLine]]] = {}
     unmatched: dict[str, list[str]] = {}
-    for sname, cfg in configs.items():
-        lines = read_source(cfg["url"])
+    for sname, cfg in list(configs.items()):
+        try:
+            lines = read_source(cfg["url"])
+        except Exception as e:  # one bad source shouldn't stop the draft tools
+            print(f"warning: source {sname} skipped: {e}", file=sys.stderr)
+            del configs[sname]
+            continue
         loaded[sname], unmatched[sname] = [], []
         for line in lines:
             pid = index.get(_norm(line.name))
@@ -321,7 +328,9 @@ def apply_sources(players: dict[str, Player], sources: dict[str, object],
         missing: set[str] = set()
         estimated = 0
         for pid, line in loaded[sname]:
-            if cfg["games"] == "projected":
+            # A per-game table without games played: use the games the other
+            # sources project rather than a flat DEFAULT_GAMES for everyone.
+            if cfg["games"] == "projected" or (line.per_game and not line.gp):
                 if not line.game_stats:
                     continue
                 gp = mean(games[pid]) if pid in games else DEFAULT_GAMES

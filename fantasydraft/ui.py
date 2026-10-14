@@ -28,7 +28,7 @@ from .io import apply_log, apply_manager, is_placeholder, league_managers, load_
 from .learn import fit_teams
 from .lineup import assign_lineup, over_targets, target_fill
 from .models import DraftState, Player, TeamProfile
-from .recommend import pick_gamble, recommend, versus_highest_projection
+from .recommend import availability_sims, pick_gamble, recommend, versus_highest_projection
 from .room import RoomTracker
 from .simulate import availability, predict_picks
 
@@ -125,8 +125,9 @@ class Dashboard:
     def _compute(self, st: DraftState) -> dict:
         if st.is_complete or not st.my_next_picks():
             return {"recs": [], "available": []}
-        recs = recommend(st, candidates=self.candidates, sims=self.sims)
-        probs = availability(st, sims=max(self.sims * 2, 100))
+        # One availability run, shared by the recommendations and the advice.
+        probs = availability(st, sims=availability_sims(self.sims), seed=1)
+        recs = recommend(st, candidates=self.candidates, sims=self.sims, avail=probs)
         advice = self._advice(st, recs, probs)
         top = sorted((p for p in st.available() if not is_placeholder(p)),
                      key=lambda p: p.proj_points, reverse=True)[:40]
@@ -394,7 +395,7 @@ class Dashboard:
         if strategy not in TeamProfile.VALID_STRATEGIES or strategy == "auto":
             raise ValueError(f"unknown strategy {strategy!r}")
         lg.teams[slot] = replace(lg.teams[slot], strategy=strategy)
-        cfg = json.loads(self.league_path.read_text(encoding="utf-8"))
+        cfg = json.loads(self.league_path.read_text(encoding="utf-8-sig"))
         cfg["teams"][slot]["strategy"] = strategy
         self.league_path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
         self.tracker.version += 1  # re-run recommendations with the new model

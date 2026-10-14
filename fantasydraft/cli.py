@@ -23,7 +23,7 @@ from pathlib import Path
 
 from .analyze import analyze
 from .drafters import CANDIDATE_POOL, choose_pick
-from .io import load_log, load_picks, load_state, player_by_rank, resolve_player, resolve_team, save_log, save_picks, save_players
+from .io import load_log, load_picks, placeholder_player, load_state, player_by_rank, resolve_player, resolve_team, save_log, save_picks, save_players
 from .models import DraftState
 from .recommend import recommend
 from .simulate import Simulator, availability
@@ -149,7 +149,8 @@ def cmd_import_picks(args) -> None:
     from .io import extract_picks, load_players, players_source
 
     players = load_players(args.players or players_source(args.league))
-    text = sys.stdin.read() if args.source == "-" else Path(args.source).read_text(encoding="utf-8")
+    from .io import read_text_file
+    text = sys.stdin.read() if args.source == "-" else read_text_file(args.source)
     picks, warnings = extract_picks(text, players)
     for w in warnings:
         print(f"warning: {w}", file=sys.stderr)
@@ -392,23 +393,39 @@ def cmd_fetch_league(args) -> None:
     names = client.team_names(data)
     owners = client.team_owners(data)
     out = Path(args.out)
-    existing = json.loads(out.read_text()) if out.exists() else {}
-    old = {t["name"]: t for t in existing.get("teams", [])}
+    existing = json.loads(out.read_text(encoding="utf-8-sig")) if out.exists() else {}
+    old_teams = existing.get("teams", [])
+    # Teams are matched by ESPN id (survives renames), else by name.
+    by_id = {t["espn_id"]: t for t in old_teams if "espn_id" in t}
+    by_name = {t["name"]: t for t in old_teams}
+    # my_team as a draft position would point at someone else once ESPN
+    # (re)sets the draft order, so remember it as a team.
+    my = existing.get("my_team", 1)
+    my_old = old_teams[my - 1] if isinstance(my, int) and 0 < my <= len(old_teams) else \
+        next((t for t in old_teams if t["name"] == my), None)
+    order = client.pick_order(data)
+    teams, my_name = [], None
+    for tid in order:
+        prev = by_id.get(tid) or by_name.get(names[tid]) or {"strategy": "unknown", "noise": 0.2}
+        entry = {**prev, "name": names[tid], "espn_id": tid, **({"owner": owners[tid]} if tid in owners else {})}
+        if my_old is not None and prev is my_old:
+            my_name = names[tid]
+        teams.append(entry)
+    scoring = client.scoring(data)
+    # Everything you set by hand is kept; only what ESPN owns is refreshed.
     cfg = {
-        "players": existing.get("players", "data/players.csv"),
-        "my_team": existing.get("my_team", 1),
-        "bench_weight": existing.get("bench_weight", 0.4),
+        "players": "data/players.csv", "bench_weight": 0.4, "sources": {}, "managers": {},
+        **existing,
+        "my_team": my_name or my,
         "roster_slots": client.roster_slots(data),
-        "scoring": client.scoring(data) or existing.get("scoring"),
-        "sources": existing.get("sources", {}),
-        "espn_team_ids": client.pick_order(data),
-        "managers": existing.get("managers", {}),
-        "teams": [{**old.get(names[tid], {"name": names[tid], "strategy": "unknown", "noise": 0.2}),
-                   **({"owner": owners[tid]} if tid in owners else {})}
-                  for tid in client.pick_order(data)],
+        "scoring": scoring or existing.get("scoring"),
+        "espn_team_ids": order,
+        "teams": teams,
     }
-    out.write_text(json.dumps(cfg, indent=2))
-    print(f"wrote {out} — set 'my_team' and each team's 'strategy' before the draft")
+    out.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    me = cfg["my_team"]
+    print(f"wrote {out}. You are: {me if isinstance(me, str) else f'draft position {me}'}"
+          " (check 'my_team' is right once ESPN sets the draft order)")
 
 
 def cmd_live(args) -> None:
@@ -430,10 +447,11 @@ def cmd_live(args) -> None:
                 # Mirror ESPN's per-pick autodraft flag as @auto/@back switches.
                 slot_of = {tid: i for i, tid in enumerate(client.pick_order(data))}
                 entries: list[tuple] = []
-                on_auto: set[int] = set()
+                on_auto: set[int] = set(state.league.start_auto)
                 for p in picks:
-                    if p.player_id not in state.players:
-                        continue
+                    # A player missing from your list is still a pick (kept as a
+                    # placeholder) so later picks stay with the right teams.
+                    state.players.setdefault(p.player_id, placeholder_player(p.player_id))
                     slot = slot_of.get(p.team_id)
                     if slot is not None and p.auto != (slot in on_auto):
                         entries.append(("auto", slot, p.auto))
@@ -533,7 +551,7 @@ def cmd_capture_ranks(args) -> None:
     from .espn import draft_ranks_from_capture
     from .io import load_players, players_source
 
-    events = [json.loads(line) for line in Path(args.capture).read_text(encoding="utf-8").splitlines() if line.strip()]
+    events = [json.loads(line) for line in Path(args.capture).read_text(encoding="utf-8-sig").splitlines() if line.strip()]
     ranks = draft_ranks_from_capture(events)
     if not ranks:
         sys.exit("no draft-room rankings found in this capture")
@@ -575,7 +593,7 @@ def cmd_history(args) -> None:
     print("\nnoise: 0.05 = very predictable, 0.3 = loose. 'ADP - pick' > 0 = reaches early.")
     if args.write:
         out = Path(args.write)
-        cfg = json.loads(out.read_text(encoding="utf-8"))
+        cfg = json.loads(out.read_text(encoding="utf-8-sig"))
         cfg["managers"] = merge_managers(cfg.get("managers", {}), rows)
         out.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
         print(f"\nSaved profiles to {out} \"managers\" (anything you'd already set was kept).")

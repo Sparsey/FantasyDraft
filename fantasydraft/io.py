@@ -7,6 +7,7 @@ import json
 import re
 import sys
 import unicodedata
+import urllib.error
 import urllib.request
 from dataclasses import replace
 from pathlib import Path
@@ -16,10 +17,13 @@ from .models import DEFAULT_ROSTER_SLOTS, POSITIONS, DraftState, League, Player,
 PLAYER_COLUMNS = ["id", "name", "positions", "nba_team", "proj_points", "espn_rank", "adp"]
 
 
+_BLANKS = {"", "-", "--", "—", "n/a", "na", "?", "none"}
+
+
 def _float(value: str | None) -> float:
     # Sheets exports may carry thousands separators ("1,234.5").
     value = (value or "").strip().replace(",", "")
-    return float(value) if value else float("inf")
+    return float("inf") if value.lower() in _BLANKS else float(value)
 
 
 def _truthy(value: str | None) -> bool:
@@ -33,10 +37,15 @@ def sheet_csv_url(url: str) -> str:
     taken from `gid=` in the link (the first tab if absent). Other URLs are
     returned unchanged.
     """
-    m = re.match(r"https://docs\.google\.com/spreadsheets/d/([\w-]+)", url)
-    if not m or "/export" in url or "output=csv" in url:
+    if "output=csv" in url or "/export" in url:
         return url
     gid = re.search(r"[#?&]gid=(\d+)", url)
+    pub = re.match(r"(https://docs\.google\.com/spreadsheets/d/e/[\w-]+)/", url)
+    if pub:  # File > Share > Publish to web link
+        return f"{pub.group(1)}/pub?output=csv" + (f"&gid={gid.group(1)}" if gid else "")
+    m = re.match(r"https://docs\.google\.com/spreadsheets/d/([\w-]+)", url)
+    if not m:
+        return url
     return (f"https://docs.google.com/spreadsheets/d/{m.group(1)}/export?format=csv"
             + (f"&gid={gid.group(1)}" if gid else ""))
 
@@ -47,9 +56,23 @@ def _read_text(source: str | Path) -> str:
         # A browser-like agent: some stats sites refuse unknown clients.
         req = urllib.request.Request(sheet_csv_url(src), headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) fantasydraft"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.read().decode("utf-8-sig")
-    return Path(src).read_text(encoding="utf-8-sig")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.read().decode("utf-8-sig")
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            why = getattr(e, "code", None) or getattr(e, "reason", None) or e
+            hint = " Is the sheet shared as 'Anyone with the link can view'?" if "docs.google.com" in src else ""
+            raise RuntimeError(f"couldn't download {src} ({why}).{hint}") from None
+    return read_text_file(src)
+
+
+def read_text_file(path: str | Path) -> str:
+    """A local text file in UTF-8 (with or without BOM) or UTF-16 (what
+    Windows PowerShell 5 writes with `>`)."""
+    data = Path(path).read_bytes()
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return data.decode("utf-16")
+    return data.decode("utf-8-sig")
 
 
 def parse_positions(text: str) -> frozenset[str]:
@@ -74,8 +97,16 @@ def load_players(source: str | Path) -> dict[str, Player]:
     """
     players: dict[str, Player] = {}
     skipped: list[str] = []
-    for line, row in enumerate(csv.DictReader(io.StringIO(_read_text(source))), start=2):
-        row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+    bad: list[str] = []
+    text = _read_text(source)
+    reader = csv.DictReader(io.StringIO(text))
+    headers = {(h or "").strip().lower() for h in reader.fieldnames or []}
+    if text.lstrip().startswith("<") or "name" not in headers:
+        raise ValueError(f"{source} doesn't look like a players table (no 'name' column). "
+                         "If it's a Google Sheet, share it as 'Anyone with the link can view'.")
+    for line, row in enumerate(reader, start=2):
+        # (a None key holds extra cells beyond the header, e.g. a stray comma in a note)
+        row = {k.strip().lower(): (v or "").strip() for k, v in row.items() if isinstance(k, str) and isinstance(v, str)}
         name = row.get("name", "")
         if not name or _truthy(row.get("ignore")):
             continue
@@ -86,6 +117,9 @@ def load_players(source: str | Path) -> dict[str, Player]:
             continue
         try:
             pid = row.get("id") or name
+            if pid in players:
+                print(f"warning: {source} line {line}: id {pid} appears twice "
+                      f"({players[pid].name} / {name}); keeping the later row", file=sys.stderr)
             players[pid] = Player(
                 id=pid,
                 name=name,
@@ -98,7 +132,19 @@ def load_players(source: str | Path) -> dict[str, Player]:
                 nba_team=row.get("nba_team", ""),
             )
         except ValueError as e:
-            raise ValueError(f"{source} line {line} ({name}): {e}") from None
+            bad.append(f"line {line} ({name}): {e}")
+    if bad:
+        print(f"warning: left out {len(bad)} rows of {source} that couldn't be read:\n  "
+              + "\n  ".join(bad[:10]), file=sys.stderr)
+    if not players:
+        raise ValueError(f"no players with projections in {source}")
+    names: dict[str, list[str]] = {}
+    for p in players.values():
+        names.setdefault(_norm(p.name), []).append(p.id)
+    dups = [ids for ids in names.values() if len(ids) > 1]
+    if dups:
+        print("warning: same player name on more than one row (ids "
+              + "; ".join(", ".join(ids) for ids in dups[:5]) + "). Delete the extra rows.", file=sys.stderr)
     if skipped:
         print(f"note: skipped {len(skipped)} players with no projection "
               f"(e.g. {', '.join(skipped[:3])})", file=sys.stderr)
@@ -157,7 +203,7 @@ def apply_manager(team: TeamProfile, managers: dict, person: str) -> TeamProfile
 def load_league(path: str | Path) -> League:
     """League file -> League. Each team's profile comes from the team entry, or
     (if the entry sets no strategy) from the matching person in "managers"."""
-    cfg = json.loads(Path(path).read_text(encoding="utf-8"))
+    cfg = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     managers = cfg.get("managers") or {}
     teams = []
     for t in cfg["teams"]:
@@ -191,7 +237,7 @@ def load_league(path: str | Path) -> League:
 
 
 def league_managers(path: str | Path) -> dict:
-    return json.loads(Path(path).read_text(encoding="utf-8")).get("managers") or {}
+    return json.loads(Path(path).read_text(encoding="utf-8-sig")).get("managers") or {}
 
 
 def player_by_rank(rank: int, players: dict[str, Player]) -> str | None:
@@ -224,6 +270,8 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 
 def _norm(text: str) -> str:
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
+    # "P.J." and "PJ" are the same: drop the dots between initials first.
+    text = re.sub(r"\b([a-z])\.(?=[a-z]\b)", r"\1", text)
     words = re.sub(r"[^a-z0-9]+", " ", text).split()
     return " ".join(w for w in words if w not in _SUFFIXES)
 
@@ -317,7 +365,7 @@ def load_log(path: str | Path, players: dict[str, Player], league: League | None
         return []
     entries: list[tuple] = []
     seen: set[str] = set()
-    for n, raw in enumerate(p.read_text(encoding="utf-8").splitlines(), start=1):
+    for n, raw in enumerate(p.read_text(encoding="utf-8-sig").splitlines(), start=1):
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue
@@ -381,13 +429,13 @@ def save_picks(picks: list[str], players: dict[str, Player], path: str | Path) -
 def players_source(league_path: str | Path) -> str:
     """Where to load players from when --players isn't given: league.json's
     "players" entry (a file path or Google Sheets link), else data/players.csv."""
-    cfg = json.loads(Path(league_path).read_text(encoding="utf-8"))
+    cfg = json.loads(Path(league_path).read_text(encoding="utf-8-sig"))
     return cfg.get("players", "data/players.csv")
 
 
 def league_sources(league_path: str | Path) -> tuple[dict[str, str], dict[str, float] | None]:
     """The league file's extra projection sources ({name: tab link/path}) and scoring."""
-    cfg = json.loads(Path(league_path).read_text(encoding="utf-8"))
+    cfg = json.loads(Path(league_path).read_text(encoding="utf-8-sig"))
     return cfg.get("sources") or {}, cfg.get("scoring")
 
 
@@ -418,4 +466,7 @@ def load_state(players_path: str | Path | None, league_path: str | Path, picks_p
         apply_log(state, load_log(picks_path, players, league))
     if len(state.picks) > league.total_picks:
         raise ValueError("more picks than the draft has")
+    if len(players) < league.total_picks:
+        print(f"warning: only {len(players)} players for a {league.total_picks}-pick draft; "
+              "the end of the draft can't be simulated properly", file=sys.stderr)
     return state

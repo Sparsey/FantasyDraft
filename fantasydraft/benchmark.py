@@ -22,7 +22,7 @@ from __future__ import annotations
 import random
 import statistics
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .drafters import CANDIDATE_POOL, add_to_counts, choose_pick, full_positions, order_for
 from .lineup import roster_value
@@ -56,7 +56,10 @@ class DraftResult:
 
 
 def _true_league(slot: int, seed: int, base: League) -> League:
-    opponents = OPPONENTS[:]
+    # As many opponents as the league has (the list repeats past 9).
+    n = len(OPPONENTS)
+    opponents = [OPPONENTS[i] if i < n else replace(OPPONENTS[i % n], name=f"{OPPONENTS[i % n].name} {i // n + 1}")
+                 for i in range(base.num_teams - 1)]
     random.Random(seed).shuffle(opponents)
     teams = opponents[:slot] + [TeamProfile("Me", "adp")] + opponents[slot:]
     return League(teams, slot, roster_slots=dict(base.roster_slots), bench_weight=base.bench_weight,

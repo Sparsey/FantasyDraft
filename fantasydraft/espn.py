@@ -10,6 +10,7 @@ browser session (DevTools -> Application -> Cookies -> espn.com).
 """
 from __future__ import annotations
 
+import sys
 import json
 import urllib.request
 from dataclasses import dataclass
@@ -120,7 +121,16 @@ class EspnClient:
         ids = {0: "PTS", 1: "BLK", 2: "STL", 3: "AST", 6: "REB", 11: "TO",
                13: "FGM", 14: "FGA", 15: "FTM", 16: "FTA", 17: "3PM"}
         items = league.get("settings", {}).get("scoringSettings", {}).get("scoringItems", [])
-        return {ids[i["statId"]]: float(i.get("points", 0)) for i in items if i.get("statId") in ids}
+        out = {ids[i["statId"]]: float(i.get("points", 0)) for i in items if i.get("statId") in ids}
+        # Stats we can't read from projection sources (double-doubles, OREB, ...)
+        # are kept under their id, so sources count as missing them and get
+        # rescaled to ESPN's level instead of being silently off.
+        other = {f"stat{i['statId']}": float(i.get("points", 0)) for i in items
+                 if i.get("statId") not in ids and float(i.get("points", 0))}
+        if other:
+            print(f"note: your league also scores ESPN stat ids {sorted(other)}, which projection "
+                  "sources don't have; their numbers will be rescaled to ESPN's level", file=sys.stderr)
+        return {**out, **other}
 
     @staticmethod
     def picks(league: dict) -> list[LivePick]:

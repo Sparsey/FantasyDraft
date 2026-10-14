@@ -105,7 +105,8 @@ class Simulator:
         """Take the player who most increases my roster value right now."""
         candidates: dict[str, Player] = {}
         need = set(POSITIONS)
-        for i, p in enumerate(self._untaken("points", taken)):
+        # Shortlist by my own (consensus) numbers: that's what my roster is valued on.
+        for i, p in enumerate(self._untaken("points@consensus", taken)):
             if i < MY_POLICY_TOP_N:
                 candidates[p.id] = p
             elif p.positions & need:
@@ -145,6 +146,8 @@ class Simulator:
                 add_to_counts(counts[t], p)
 
         for pick in range(self.state.current_pick, min(until or league.total_picks, league.total_picks)):
+            if len(taken) >= len(self.state.players):
+                break  # player list shorter than the draft: nobody left to take
             team = league.team_for_pick(pick)
             if team == league.my_slot:
                 if not i_pick:
@@ -159,6 +162,8 @@ class Simulator:
             else:
                 profile = self.profile(team, drawn)
                 pool, keys = self._pool(profile.order_key, taken, starts)
+                if not pool:
+                    break
                 full = full_positions(counts[team], targets) if bias else frozenset()
                 choice = choose_pick(profile, pool, rng, pick, keys, full, bias, counts[team], targets)
                 taken_at[choice.id] = pick

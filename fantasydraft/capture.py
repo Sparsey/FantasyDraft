@@ -117,7 +117,7 @@ def _shape(data: str) -> str:
 
 def summarize(path: str | Path, samples: int = 3) -> str:
     """Redacted overview of a capture: message types with examples, safe to share."""
-    events = [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    events = [json.loads(line) for line in Path(path).read_text(encoding="utf-8-sig").splitlines() if line.strip()]
     out = [f"{len(events)} events: {dict(Counter(e.get('kind', '?') for e in events))}"]
 
     for kind in ("ws-in", "ws-out"):

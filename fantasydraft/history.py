@@ -11,6 +11,7 @@ NBA teams are players' current teams, so treat "favourite team" as a hint.
 """
 from __future__ import annotations
 
+import sys
 from collections import Counter
 from dataclasses import dataclass
 
@@ -73,7 +74,11 @@ def analyze_draft(league_data: dict, players_raw: list[dict], season: int, me: s
         players.setdefault(lp.player_id, placeholder_player(lp.player_id))
 
     me_key = me.lower().strip()
-    my_slot = next((i for i, tid in enumerate(order) if me_key and me_key in owners.get(tid, "").lower()), 0)
+    my_slot = next((i for i, tid in enumerate(order) if me_key and me_key in owners.get(tid, "").lower()), None)
+    found_me = my_slot is not None
+    if not found_me:
+        print(f"note: {me!r} not found among the owners; fitting every team", file=sys.stderr)
+        my_slot = 0
     slots = EspnClient.roster_slots(league_data) or dict(DEFAULT_ROSTER_SLOTS)
     league = League([TeamProfile(names.get(tid, str(tid)), "unknown", 0.2, manager=owners.get(tid, ""))
                      for tid in order], my_slot, roster_slots=slots)
@@ -92,6 +97,11 @@ def analyze_draft(league_data: dict, players_raw: list[dict], season: int, me: s
     state.picks = state.picks[: league.total_picks]
 
     fits = fit_teams(state)
+    if not found_me:  # the "me" slot is never fitted: fit slot 0 with another slot as "me"
+        other = League(league.teams, 1, roster_slots=slots)
+        refit = fit_teams(DraftState(other, players, state.picks, set(state.auto_teams), set(state.auto_picks)))
+        if 0 in refit:
+            fits[0] = refit[0]
     tendencies = analyze(state)
     rosters = state.rosters()
     out = []
