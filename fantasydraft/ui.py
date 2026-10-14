@@ -87,7 +87,6 @@ class Dashboard:
         self.done_version = -1  # last version fully computed
         self._prev_chances: tuple[int | None, dict] = (None, {})  # (my next pick, chances) last time
         self._prev: dict = {}  # chances to compare with in this round of updates
-        self._last_order: list[str] = []  # recommendation order last time (keeps rows steady)
         self.computing = False
         self.predictions: list[dict] = []
         self.pred_history: dict[int, dict[str, float]] = {}  # pick -> {player: P} predicted beforehand
@@ -152,7 +151,6 @@ class Dashboard:
                 result = {"error": "recommendation failed — see terminal"}
             if not self._publish(version, result, "full"):
                 continue
-            self._last_order = [x["id"] for x in result.get("recs") or []]
             with self.lock:
                 self.computing = False
                 self.done_version = version
@@ -187,27 +185,34 @@ class Dashboard:
         and, once `probs` is known, their chances and the SAFE pick."""
         if st.is_complete or not st.my_next_picks():
             return {"recs": []}
+        shown, espn_top = self._board(st, probs)
+        rows = [{**self._board_row(st, p, probs),
+                 "tag": "safe" if probs is not None and p is espn_top else None,
+                 "is_baseline": probs is not None and p is espn_top} for p in shown]
+        return {"recs": rows, "advice": None, "has_sources": self._has_sources(st),
+                "underrated": self._underrated(st, probs or {})}
+
+    BOARD_SIZE = 14
+
+    def _board(self, st: DraftState, probs: dict | None) -> tuple[list[Player], Player | None]:
+        """The players to list: the best available by your projections (leaving
+        out those almost sure to be gone before your pick), plus ESPN's pick."""
         on_clock = st.my_next_picks()[0] == st.current_pick
         avail = [p for p in st.available() if not is_placeholder(p)]
         if probs is not None and not on_clock:  # same cut as the recommendations
             avail = [p for p in avail if (probs.get(p.id) or [0])[0] >= MIN_AVAIL] or avail
-        shown = sorted(avail, key=lambda p: p.proj_points, reverse=True)[:self.candidates + 2]
+        shown = sorted(avail, key=lambda p: p.proj_points, reverse=True)[:self.BOARD_SIZE]
         espn_top = max(avail, key=lambda p: (p.room_points, p.proj_points), default=None)
         if espn_top is not None and espn_top not in shown:
             shown.append(espn_top)
-        # Keep last time's order while the new comparison is worked out.
-        order = {pid: i for i, pid in enumerate(self._last_order)}
-        shown.sort(key=lambda p: (order.get(p.id, len(order)), -p.proj_points))
-        rows = []
-        for p in shown:
-            pr = (probs or {}).get(p.id, [])
-            rows.append({**self._player_fields(p), **self._trend(st, p, probs),
-                         "p_now": 1.0 if on_clock else (pr[0] if pr else None) if probs is not None else None,
-                         "p_after": (pr[1] if len(pr) > 1 else 0.0) if probs is not None else None,
-                         "tag": "safe" if probs is not None and p is espn_top else None,
-                         "is_baseline": probs is not None and p is espn_top})
-        return {"recs": rows, "advice": None, "has_sources": self._has_sources(st),
-                "underrated": self._underrated(st, probs or {})}
+        return shown, espn_top
+
+    def _board_row(self, st: DraftState, p: Player, probs: dict | None) -> dict:
+        on_clock = st.my_next_picks()[0] == st.current_pick
+        pr = (probs or {}).get(p.id, [])
+        return {**self._player_fields(p), **self._trend(st, p, probs),
+                "p_now": 1.0 if on_clock else (pr[0] if pr else None) if probs is not None else None,
+                "p_after": (pr[1] if len(pr) > 1 else 0.0) if probs is not None else None}
 
     @staticmethod
     def _outlook(st: DraftState, probs: dict, likely: dict[str, float]) -> dict | None:
@@ -275,16 +280,23 @@ class Dashboard:
                     "p_better": v.p_better, "avg_up": round(v.avg_up), "p_worse": v.p_worse,
                     "avg_down": round(v.avg_down)}
 
+        rows = [{
+            **self._player_fields(r.player), **self._trend(st, r.player, probs),
+            "p_now": r.p_avail_now, "p_after": r.p_avail_after,
+            "value": round(r.exp_final_value),
+            **vs_fields(r),
+            "is_target": i == 0,
+            "tag": "safe" if baseline and r.player.id == baseline.id
+                   else "gamble" if gamble and r.player.id == gamble.id else None,
+        } for i, r in enumerate(recs)]
+        # The rest of the board (not compared in the simulations), all by your projections.
+        listed = {r.player.id for r in recs}
+        board, _ = self._board(st, probs)
+        rows += [self._board_row(st, p, probs) for p in board if p.id not in listed]
+        rows.sort(key=lambda x: -x["proj"])
         return {
             "advice": advice,
-            "recs": [{
-                **self._player_fields(r.player), **self._trend(st, r.player, probs),
-                "p_now": r.p_avail_now, "p_after": r.p_avail_after,
-                "value": round(r.exp_final_value),
-                **vs_fields(r),
-                "tag": "safe" if baseline and r.player.id == baseline.id
-                       else "gamble" if gamble and r.player.id == gamble.id else None,
-            } for r in recs],
+            "recs": rows,
             "underrated": self._underrated(st, probs),
             "has_sources": self._has_sources(st),
         }
@@ -451,7 +463,8 @@ class Dashboard:
                          "guess": None if guess is None else {**brief(guess[0]), "p": guess[1]}})
         upcoming = []
         # The top recommendation once the full comparison is in (already without anyone just drafted).
-        top_rec = (result.get("recs") or [None])[0] if result.get("stage") == "full" else None
+        top_rec = next((x for x in result.get("recs") or [] if x.get("is_target")), None) \
+            if result.get("stage") == "full" else None
         taken = set(st.picks)
         taken_names = {st.players[pid].name for pid in taken if pid in st.players}
         for row in self.predictions:

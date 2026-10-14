@@ -122,6 +122,10 @@
   .chg { font-size: 10.5px; font-weight: 700; margin-right: 4px; font-variant-numeric: tabular-nums; }
   .chg.up { color: var(--good); } .chg.dn { color: var(--bad); }
   .advice.updating { opacity: .55; }
+  tr.avl td { padding: 0 8px; border-top: 2px dashed var(--line); font-size: 11px; font-weight: 700; color: var(--muted); }
+  tr.avl td span { position: relative; top: -1px; background: var(--panel); padding: 0 6px; }
+  tr.avl.half td { border-top-color: var(--warn); color: var(--warn); }
+  tr.avl.sure td { border-top-color: var(--good); color: var(--good); }
   .tline { display: flex; flex-wrap: wrap; gap: 3px 18px; align-items: baseline; color: var(--ink); }
   .tline .tgt { font-size: 14.5px; }
   .likely { font-size: 12px; color: var(--muted); margin-top: 3px; }
@@ -280,6 +284,20 @@ function tagTxt(x) {
   if (x.tag === "gamble") t += `<span class="ptag gamble" title="Ends with a better final roster than ESPN's pick in at least 40% of simulated drafts">GAMBLE</span>`;
   if (x.falling) t += `<span class="ptag fall" title="ESPN ranks him well before your pick, but he has a real chance of lasting to you">FALLING</span>`;
   return t;
+}
+// Divider lines in the board (sorted by your projections): from the line down,
+// every player has at least that chance of still being there at your pick.
+function availLine(r, i, cols) {
+  if (!S.status.picks_until || !r.recs.length || r.recs[0].p_now == null) return "";
+  const from = (t) => {  // first row from which every row below is at least t
+    let k = r.recs.length;
+    while (k > 0 && (r.recs[k - 1].p_now ?? 0) >= t) k--;
+    return k;
+  };
+  const at = S.status.my_next, lines = [];
+  if (from(0.9) === i) lines.push(["sure", `90%+ there at #${at} from here down`]);
+  else if (from(0.5) === i) lines.push(["half", `50%+ there at #${at} from here down`]);
+  return lines.map(([c, t]) => `<tr class="avl ${c}"><td colspan="${cols}"><span>${t}</span></td></tr>`).join("");
 }
 function changeTxt(x) {
   if (x.p_change == null || Math.abs(x.p_change) < 0.05) return "";
@@ -460,6 +478,7 @@ function renderTeams() {
 function renderTable(r) {
   const body = $("tablebody");
   if (tab === "recs") {
+    const cols = (r.has_sources ? 4 : 2) + 3 + (manual() ? 1 : 0);
     if (!r.recs) { body.innerHTML = `<div class="empty-note">Working out recommendations…</div>`; return; }
     if (!r.recs.length) { body.innerHTML = `<div class="empty-note">Nothing to recommend — your draft is done.</div>`; return; }
     body.innerHTML = `<table><thead><tr><th>Player</th>
@@ -468,7 +487,7 @@ function renderTable(r) {
       <th class="num" title="Chance the player lasts to the pick after that, if you pass">Lasts</th>
       <th class="num" title="Final roster value (by your combined numbers) compared with taking ESPN's pick, averaged over simulated drafts. Hover a value for how often it ends better or worse">vs ESPN pick</th>
       ${manual() ? "<th></th>" : ""}</tr></thead><tbody>` +
-      r.recs.map((x, i) => `<tr class="${i === 0 && r.stage === "full" ? "top" : ""}" ${x.value != null ? `title="Final roster value ${x.value.toLocaleString()}"` : ""}>
+      r.recs.map((x, i) => availLine(r, i, cols) + `<tr class="${x.is_target ? "top" : ""}" ${x.value != null ? `title="Final roster value ${x.value.toLocaleString()}"` : ""}>
         <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span>${tagTxt(x)}</td>
         ${r.has_sources ? projCells(x) : `<td class="num">${x.proj.toLocaleString()}</td>`}
         <td class="num">${changeTxt(x)}${bar(x.p_now)}</td><td class="num">${bar(x.p_after)}</td>

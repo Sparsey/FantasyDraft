@@ -45,12 +45,14 @@ the same file resumes.
   picks until yours, and feed status. The search box records a pick by hand
   (ESPN rank or name, then Enter) if the feed isn't running.
 - **Pick strip:** each pick up to yours, with who that team will likely take.
-- **Recommendations:** SAFE (ESPN's top projection you can realistically get)
-  and how every other option compares on final roster value ("vs SAFE"; hover
-  for the better/worse odds), plus your position counts (`C 3/3`). Players
-  with under 5% chance of lasting to your pick are left out. **Sleepers**
-  lists players your sources rate well above ESPN, for later rounds. `+`
-  (only without a live feed) records a player as the next pick.
+- **Recommendations:** a summary line (target at your pick, ESPN's pick if
+  different, any GAMBLE, who is likely best left), then the board: available
+  players by your combined projections, ESPN vs Mine, chance each is there at
+  your pick, with lines marking where it's 50%+ and 90%+ from there down. The
+  target row is highlighted; tags mark ESPN's pick, GAMBLE and FALLING
+  players; arrows show chances that moved since the last pick. **Sleepers**
+  lists players your sources rate well above ESPN. `+` (only without a live
+  feed) records a player as the next pick.
 - **Teams:** rolling score (value gained vs. pick slot), starting-lineup
   rank, the model used for each team (dropdown, saved to the league file;
   hover a team for its details) and the autodraft switch.
