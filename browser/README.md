@@ -23,23 +23,36 @@ Works for ESPN mock drafts and real league drafts alike.
 
 1. Create the league file (for a mock: your draft position and team count):
    ```bash
-   python -m fantasydraft new-league mock.json --teams 10 --my-pick 8 --players "<sheet link>"
+   python -m fantasydraft new-league mock.json --teams 10 --my-pick 8 --players "<sheet link>" --force
    ```
    For your real league, use your `league.json` instead.
-2. **Terminal 1**, before opening the draft room:
+2. Start the dashboard **before** opening the draft room. This is the only
+   thing you need running:
    ```bash
-   python -m fantasydraft room --league mock.json --picks mock1.txt --out mock1.jsonl
+   python -m fantasydraft ui --league mock.json --picks mock3.txt
    ```
-3. **Terminal 2:**
-   ```bash
-   python -m fantasydraft watch --league mock.json --picks mock1.txt --sims 40
-   ```
-4. Open the draft room. Terminal 1 shows `Draft page connected`, then each
-   pick as it happens. Picks made by autodraft are marked `[auto]`, and
-   teams going on or off autodraft are listed. Terminal 2 refreshes after
-   every pick.
+   It opens in its own window (Chrome/Edge app mode; `--tab` for a normal
+   tab). Snap it to one half of the screen and the draft room to the other.
+3. Open the draft room and reload it once. The dot at the top right turns
+   green ("live from draft room"), and picks appear by themselves.
 
-Use a new picks file (`mock2.txt`, …) for each mock.
+Use a new picks file (`mock3.txt`, …) for each mock. Restarting `ui` with
+the same file resumes.
+
+### The dashboard
+
+- **Top bar:** pick number, who's on the clock with the countdown, how many
+  picks until yours, and feed status. The search box records a pick by hand
+  (ESPN rank or name, then Enter) if the feed isn't running.
+- **Recommendations / Best available:** what `watch` shows, recomputed in
+  the background after every pick. `+` records a player as the next pick.
+- **Your lineup:** players by slot, plus position targets (`C 3/3`).
+- **Teams:** each team's modelled strategy (change it from the dropdown,
+  which saves to the league file) and the autodraft switch. Below that is
+  what their own picks suggest so far ("looks like rank"); `use` adopts it.
+- **Recent picks** (autodraft picks tagged) and a **log**.
+
+The terminal pair `room` + `watch` still works if you prefer it.
 
 ### What it handles
 

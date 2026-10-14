@@ -62,6 +62,7 @@ python -m fantasydraft watch --league examples/league.json
 
 | command | what it does |
 |---|---|
+| `ui` | **draft dashboard** in its own window: live draft-room feed + recommendations + teams, one process ([browser/README.md](browser/README.md)) |
 | `draft` | interactive tracker: type picks and `auto`/`back` switches, recommendations after each |
 | `room` | follow the ESPN draft room live via a browser userscript and write `picks.txt` automatically ([browser/README.md](browser/README.md)) |
 | `capture` | record raw draft-room traffic (troubleshooting) |

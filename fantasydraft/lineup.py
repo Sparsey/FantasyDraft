@@ -71,3 +71,14 @@ def team_value(roster: list[Player], league: League) -> float:
     if league.balance_penalty:
         value -= league.balance_penalty * sum(p.proj_points for p in over_targets(roster, league))
     return value
+
+
+def target_fill(roster: Iterable[Player], league: League) -> tuple[dict[str, int], list[Player]]:
+    """How many players fill each position target (flexible assignment), and who is over."""
+    slots = league.target_slots
+    owners, extra = assign_lineup(roster, slots)
+    filled = {pos: 0 for pos in league.targets}
+    for slot, p in zip(slots, owners):
+        if p is not None:
+            filled[slot] += 1
+    return filled, extra

@@ -88,17 +88,11 @@ def _status(state: DraftState) -> str:
 
 
 def _positions_line(state: DraftState) -> str:
-    """e.g. 'PG 1/3  SG 2/3  SF 1/3  PF 1/3  C 3/3 (+1 over)' using flexible assignment."""
-    from .lineup import assign_lineup
+    """e.g. 'PG 1/3  SG 2/3  SF 1/3  PF 1/3  C 3/3' using flexible assignment."""
+    from .lineup import target_fill
 
     league = state.league
-    roster = state.rosters()[league.my_slot]
-    slots = league.target_slots
-    owners, extra = assign_lineup(roster, slots)
-    filled = {pos: 0 for pos in league.targets}
-    for slot, p in zip(slots, owners):
-        if p is not None:
-            filled[slot] += 1
+    filled, extra = target_fill(state.rosters()[league.my_slot], league)
     parts = [f"{pos} {filled[pos]}/{n}" for pos, n in league.targets.items()]
     if extra:
         parts.append(f"(over targets: {', '.join(p.name for p in extra)})")
@@ -457,7 +451,7 @@ def cmd_ui(args) -> None:
     from .ui import Dashboard, serve
 
     dash = Dashboard(args.players, args.league, args.picks, args.out, sims=args.sims, candidates=args.candidates)
-    serve(dash, args.port, open_browser=not args.no_browser)
+    serve(dash, args.port, open_browser=not args.no_browser, app_window=not args.tab)
 
 
 def cmd_room(args) -> None:
@@ -586,6 +580,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--out", default="draft_feed.jsonl", help="raw draft-room log (troubleshooting)")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--no-browser", action="store_true", help="don't open the dashboard automatically")
+    p.add_argument("--tab", action="store_true", help="open in a normal browser tab instead of its own window")
     p.set_defaults(func=cmd_ui)
 
     p = sub.add_parser("room", help="follow an ESPN draft room live via the browser userscript (writes picks.txt)")

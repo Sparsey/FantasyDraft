@@ -11,16 +11,21 @@ the draft changes, so the page never blocks on a simulation.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import threading
 import time
 import traceback
 import webbrowser
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from .analyze import analyze
 from .io import apply_log, is_placeholder, load_state
-from .lineup import assign_lineup
-from .models import DraftState, Player
+from .lineup import assign_lineup, target_fill
+from .models import DraftState, Player, TeamProfile
 from .recommend import recommend
 from .room import RoomTracker
 from .simulate import availability
@@ -41,6 +46,8 @@ class Dashboard:
         state = load_state(players_src, league_path, None)
         self.league = state.league
         self.players = state.players
+        self.league_path = Path(league_path)
+        self._tendencies: tuple[int, list] = (-1, [])
         self.tracker = RoomTracker(self.league, self.players, picks_path, log=self._log)
         self.raw_log = Path(raw_log) if raw_log else None
         self.sims, self.candidates = sims, candidates
@@ -123,6 +130,8 @@ class Dashboard:
                 recent.append({"pick": i + 1, "team": tr.name(slot), "slot": slot, "name": p.name,
                                "pos": _pos(p), "auto": i in st.auto_picks, "mine": slot == lg.my_slot})
             suggestion = self.players.get(tr.suggestion) if tr.suggestion else None
+            filled, over = target_fill(rosters[lg.my_slot], lg)
+            tendencies = self._team_tendencies(st)
             return {
                 "version": tr.version,
                 "computing": self.computing or self.result["version"] != tr.version,
@@ -149,14 +158,48 @@ class Dashboard:
                 "bench": [{"name": p.name, "pos": _pos(p), "proj": round(p.proj_points)} for p in bench],
                 "bench_slots": lg.roster_slots.get("BE", 0),
                 "teams": [{
-                    "slot": i, "name": tr.name(i), "strategy": t.strategy, "auto": i in st.auto_teams,
-                    "me": i == lg.my_slot, "count": len(rosters[i]),
+                    "slot": i, "name": tr.name(i), "strategy": t.strategy, "noise": t.noise,
+                    "auto": i in st.auto_teams, "me": i == lg.my_slot, "count": len(rosters[i]),
                     "last": rosters[i][-1].name if rosters[i] else None,
+                    "observed": tendencies[i],
                 } for i, t in enumerate(lg.teams)],
+                "positions": {"targets": lg.targets, "filled": filled,
+                              "over": [p.name for p in over]},
                 "recent": recent[::-1],
                 "log": list(tr.recent_log)[-12:],
                 "result": self.result,
             }
+
+    def _team_tendencies(self, st: DraftState) -> list[dict | None]:
+        """What each team's own (non-autodraft) picks so far suggest; cached per draft version."""
+        version = self.tracker.version
+        if self._tendencies[0] != version:
+            rows = []
+            for t in analyze(st):
+                rows.append(None if t.picks == 0 else {
+                    "picks": t.picks, "auto_picks": t.auto_picks,
+                    "top_rank": round(t.top_rank_rate, 2), "top_proj": round(t.top_points_rate, 2),
+                    "vs_adp": round(t.reach_vs_adp, 1), "vs_rank": round(t.reach_vs_rank, 1),
+                    "suggested": t.suggested,
+                })
+            self._tendencies = (version, rows)
+        return self._tendencies[1]
+
+    def set_strategy(self, slot: int, strategy: str) -> str:
+        """Change a team's saved strategy, here and in the league file."""
+        lg = self.league
+        if not 0 <= slot < lg.num_teams:
+            raise ValueError("no such team")
+        if strategy not in TeamProfile.VALID_STRATEGIES:
+            raise ValueError(f"unknown strategy {strategy!r}")
+        lg.teams[slot] = replace(lg.teams[slot], strategy=strategy)
+        cfg = json.loads(self.league_path.read_text(encoding="utf-8"))
+        cfg["teams"][slot]["strategy"] = strategy
+        self.league_path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+        self.tracker.version += 1  # re-run recommendations with the new model
+        name = self.tracker.name(slot)
+        self.tracker.log(f"   {name}: strategy set to {strategy}")
+        return f"{name} now modelled as '{strategy}'"
 
     def players_list(self) -> list[dict]:
         with self.lock:
@@ -177,6 +220,8 @@ class Dashboard:
             elif path == "/api/auto":
                 tr.manual_auto(int(body["slot"]), bool(body["on"]))
                 msg = "ok"
+            elif path == "/api/strategy":
+                msg = self.set_strategy(int(body["slot"]), str(body["strategy"]))
             else:
                 raise KeyError(path)
         self._changed()
@@ -203,7 +248,36 @@ class Dashboard:
             self._changed()
 
 
-def serve(dash: Dashboard, port: int = 8765, open_browser: bool = True) -> None:
+def _app_browser() -> str | None:
+    """Chrome or Edge executable, for a window without tabs or address bar."""
+    for name in ("chrome", "google-chrome", "chromium", "msedge", "microsoft-edge"):
+        found = shutil.which(name)
+        if found:
+            return found
+    candidates = []
+    for base in (os.environ.get("PROGRAMFILES"), os.environ.get("PROGRAMFILES(X86)"), os.environ.get("LOCALAPPDATA")):
+        if base:
+            candidates += [os.path.join(base, "Google", "Chrome", "Application", "chrome.exe"),
+                           os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe")]
+    candidates += ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                   "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"]
+    return next((c for c in candidates if os.path.exists(c)), None)
+
+
+def open_window(url: str, app_window: bool = True) -> None:
+    """Open the dashboard: its own app-style window if possible, else a normal tab."""
+    exe = _app_browser() if app_window else None
+    if exe:
+        try:
+            subprocess.Popen([exe, f"--app={url}", "--window-size=900,1000"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return
+        except OSError:
+            pass
+    webbrowser.open(url)
+
+
+def serve(dash: Dashboard, port: int = 8765, open_browser: bool = True, app_window: bool = True) -> None:
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code: int, body: bytes = b"", ctype: str = "application/json") -> None:
             self.send_response(code)
@@ -233,6 +307,8 @@ def serve(dash: Dashboard, port: int = 8765, open_browser: bool = True) -> None:
                 self._json(dash.snapshot())
             elif path == "/api/players":
                 self._json(dash.players_list())
+            elif path == "/favicon.ico":
+                self._send(204)
             else:
                 self._send(404)
 
@@ -262,7 +338,7 @@ def serve(dash: Dashboard, port: int = 8765, open_browser: bool = True) -> None:
     url = f"http://127.0.0.1:{port}/"
     print(f"Dashboard: {url}  (Ctrl+C to stop)", flush=True)
     if open_browser:
-        threading.Timer(0.5, lambda: webbrowser.open(url)).start()
+        threading.Timer(0.5, lambda: open_window(url, app_window)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
