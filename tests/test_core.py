@@ -516,3 +516,22 @@ def test_hashtag_style_source_to_league_points():
     assert players["j"].proj_points == pytest.approx((4838 + 67.4 * 72) / 2, abs=5)
     assert players["j"].room_points == 4838.0  # opponents still see ESPN
     assert players["x"].proj_points == 1000.0 and len(players["x"].sources) == 1
+
+
+def test_basketball_reference_style_source(tmp_path):
+    from fantasydraft.sources import fantasy_points, read_source
+
+    f = tmp_path / "bbref.csv"
+    f.write_text(
+        "Rk,Player,Age,Team,Pos,G,GS,MP,FG,FGA,FG%,3P,3PA,3P%,2P,2PA,2P%,eFG%,FT,FTA,FT%,ORB,DRB,TRB,AST,STL,BLK,TOV,PF,PTS\n"
+        "1,Nikola Jokić*,30,DEN,C,70,70,36.7,11.2,19.5,.576,2.0,4.7,.417,9.2,14.8,.623,.627,5.5,6.6,.833,2.9,9.8,12.7,10.2,1.8,0.6,3.3,2.3,29.9\n"
+        "2,Some Traded,25,2TM,SF,60,10,20,3.0,7.0,.43,1,3,.33,2,4,.5,.5,1,1.2,.8,1,2,3,1,0.5,0.2,1,1,8.0\n"
+        "3,Some Traded,25,AAA,SF,30,5,20,3.0,7.0,.43,1,3,.33,2,4,.5,.5,1,1.2,.8,1,2,3,1,0.5,0.2,1,1,8.0\n"
+        "Rk,Player,Age,Team,Pos,G,GS,MP,FG,FGA,FG%,3P,3PA,3P%,2P,2PA,2P%,eFG%,FT,FTA,FT%,ORB,DRB,TRB,AST,STL,BLK,TOV,PF,PTS\n"
+    )
+    lines = read_source(str(f))
+    assert [l.name for l in lines] == ["Nikola Jokić", "Some Traded"]
+    j = lines[0].stats
+    assert j["FGM"] == pytest.approx(11.2 * 70) and j["FGA"] == pytest.approx(19.5 * 70)
+    pts, missing = fantasy_points(j, {"PTS": 1, "FGM": 2, "FGA": -1, "TO": -2})
+    assert not missing

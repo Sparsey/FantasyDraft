@@ -10,7 +10,8 @@ found by header name, so layouts differ freely:
   assists, ...       3PM (also "3PTM", "3P", or "3:00 PM" when Sheets has
                      turned the header into a time)
   shooting           FG% / FT% as 0.573 or "0.573(10.5/18.3)" (made/att per
-                     game), or separate FGM/FGA/FTM/FTA columns
+                     game), or separate FGM/FGA/FTM/FTA columns (Basketball-
+                     Reference's "FG"/"FT" are makes)
 
 Stats are per game when there's a GP column and the numbers look per-game,
 otherwise season totals. Each source's stats are converted to the league's
@@ -43,8 +44,8 @@ _HEADERS = {
     "BLK": ("BLK", "BLOCKS"),
     "TO": ("TO", "TOV", "TURNOVERS"),
     "3PM": ("3PM", "3PTM", "3P", "TPM", "3PT", "THREES"),
-    "FG%": ("FG", "FGPCT", "FGP"),
-    "FT%": ("FT", "FTPCT", "FTP"),
+    "FG%": ("FGPCT", "FGP"),
+    "FT%": ("FTPCT", "FTP"),
     "FGM": ("FGM",), "FGA": ("FGA",), "FTM": ("FTM",), "FTA": ("FTA",),
 }
 _SHOT = re.compile(r"^\s*([\d.]+)\s*\(\s*([\d.]+)\s*/\s*([\d.]+)\s*\)")
@@ -54,6 +55,11 @@ def _key(header: str) -> str | None:
     h = re.sub(r"[^A-Z0-9%]", "", header.upper())
     if h.startswith("3") and "PM" in h:  # "3PM", or Sheets' "3:00 PM"
         return "3PM"
+    # Basketball-Reference style: "FG"/"FT" are makes, "FG%"/"FT%" percentages.
+    if h in ("FG", "FT"):
+        return h + "M"
+    if h in ("FG%", "FT%"):
+        return h
     h = h.replace("%", "")
     for key, names in _HEADERS.items():
         if h in names:
@@ -103,6 +109,7 @@ def read_source(src: str) -> list[SourceLine]:
         if k and k not in cols:
             cols[k] = i
     raw: list[tuple[str, dict[str, float], float | None]] = []
+    seen: set[str] = set()
     for r in rows[header_idx + 1:]:
         if len(r) <= cols["name"] or not r[cols["name"]].strip() or _key(r[cols["name"]]) == "name":
             continue  # blank or a repeated header row
@@ -118,8 +125,11 @@ def read_source(src: str) -> list[SourceLine]:
                 stats["FGA" if k == "FG%" else "FTA"] = att
             elif (v := _num(cell)) is not None:
                 stats[k] = v
-        if "PTS" in stats:
-            raw.append((clean_name(r[cols["name"]]), stats, stats.pop("GP", None)))
+        name = clean_name(r[cols["name"]]).rstrip("*")
+        # Traded players appear once per team after a combined row: keep the first.
+        if "PTS" in stats and _norm(name) not in seen:
+            seen.add(_norm(name))
+            raw.append((name, stats, stats.pop("GP", None)))
     if not raw:
         raise ValueError(f"{src}: no player rows with points found")
     # Per game if the best scorer averages under ~60 points; then scale by GP.
