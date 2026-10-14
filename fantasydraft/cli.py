@@ -308,7 +308,18 @@ def cmd_new_league(args) -> None:
         "roster_slots": {"PG": 1, "SG": 1, "SF": 1, "PF": 1, "C": 1, "G": 1, "F": 1, "UTIL": 3, "BE": 3},
         "teams": teams,
     }
-    out.write_text(json.dumps(cfg, indent=2) + "\n")
+    # Same players sheet, sources, scoring and settings as your real league,
+    # but none of its teams or people (a mock has strangers in it).
+    like = Path(args.like) if args.like else None
+    if like and like.exists() and like.resolve() != out.resolve():
+        base = json.loads(like.read_text(encoding="utf-8-sig"))
+        keep = {k: v for k, v in base.items()
+                if k not in ("teams", "my_team", "managers", "espn_team_ids")}
+        if args.players:
+            keep.pop("players", None)
+        cfg = {**cfg, **keep}
+        print(f"copied players, sources and settings from {like}")
+    out.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {out}: {args.teams} teams, you pick #{args.my_pick}, others '{args.strategy}'")
 
 
@@ -702,6 +713,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--strategy", default="unknown", choices=["unknown", "auto", "adp", "rank", "points"],
                    help="saved strategy for the other teams (unknown = learn from their picks)")
     p.add_argument("--noise", type=float, default=0.2)
+    p.add_argument("--like", default="league.json",
+                   help="copy players, sources and scoring from this league file if it exists (default league.json)")
     p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_new_league)
 
