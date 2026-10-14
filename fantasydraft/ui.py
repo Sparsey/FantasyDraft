@@ -31,12 +31,13 @@ from .io import (apply_log, apply_manager, is_placeholder, league_managers, load
 from .learn import fit_teams
 from .lineup import over_targets, target_fill
 from .models import DraftState, Player, TeamProfile
-from .recommend import MIN_AVAIL, availability_sims, pick_gamble, recommend, versus_highest_projection
+from .recommend import MIN_AVAIL, availability_sims, recommend, versus_highest_projection
 from .room import RoomTracker
 from .simulate import availability, predict_picks
 
 PAGE = Path(__file__).parent / "web" / "index.html"
 TARGET_MIN_AVAIL = 0.5  # the target must have at least this chance of being there at your pick
+GAMBLE_MIN_GAIN = 50  # a GAMBLE must beat ESPN's pick by at least this much by your projections
 
 
 def _pos(p: Player) -> str:
@@ -220,11 +221,13 @@ class Dashboard:
         # Keep the last target highlighted until the new comparison is in.
         mine = st.my_next_picks()
         keep = self._target[1] if self._target[0] == mine[0] else None
+        gamble = self._gamble(st, probs)
         rows = [{**self._board_row(st, p, probs),
                  "is_target": p.id == keep,
-                 "tag": "safe" if probs is not None and p is espn_top else None,
+                 "tag": "gamble" if gamble and p.id == gamble["id"]
+                        else "safe" if probs is not None and p is espn_top else None,
                  "is_baseline": probs is not None and p is espn_top} for p in shown]
-        return {"recs": rows, "advice": None, "has_sources": self._has_sources(st),
+        return {"recs": rows, "advice": {"gamble": gamble} if gamble else None, "has_sources": self._has_sources(st),
                 "underrated": self._underrated(st, probs or {}), "floor_proj": self._floor_proj(st)}
 
     BOARD_SIZE = 14
@@ -243,6 +246,36 @@ class Dashboard:
             shown.append(espn_top)
             shown.sort(key=lambda p: -p.proj_points)  # in its place on the board, not at the end
         return shown, espn_top
+
+    @staticmethod
+    def _gamble(st: DraftState, probs: dict | None) -> dict | None:
+        """GAMBLE: take a player who raises your total by your projections (at
+        least GAMBLE_MIN_GAIN over ESPN's pick) and won't last to your following
+        pick, passing on ESPN's pick. How safe that is: the chance ESPN's pick
+        is still there at your following pick (high = you'll likely get him then)."""
+        mine = st.my_next_picks()
+        if probs is None or not mine:
+            return None
+        on_clock = mine[0] == st.current_pick
+        now = lambda p: 1.0 if on_clock else (probs.get(p.id) or [0])[0]  # noqa: E731
+        lasts = lambda p: (probs.get(p.id) or [0, 0])[1] if len(probs.get(p.id) or []) > 1 else 0.0  # noqa: E731
+        avail = [p for p in st.available() if not is_placeholder(p) and now(p) >= MIN_AVAIL]
+        if not avail:
+            return None
+        espn = max(avail, key=lambda p: (p.room_points, p.proj_points))
+        options = [p for p in avail if p.id != espn.id and now(p) >= 0.5 and lasts(p) < 0.5
+                   and p.proj_points - espn.proj_points >= GAMBLE_MIN_GAIN]
+        if not options:
+            return None
+        g = max(options, key=lambda p: p.proj_points)
+        safety = lasts(espn)
+        return {"id": g.id, "name": g.name, "espn": espn.name, "espn_id": espn.id,
+                "gain": round(g.proj_points - espn.proj_points),
+                "g_proj": round(g.proj_points), "g_espn": round(g.room_points),
+                "e_proj": round(espn.proj_points), "e_espn": round(espn.room_points),
+                "e_lasts": round(safety, 2), "g_lasts": round(lasts(g), 2),
+                "level": "safe" if safety >= 0.7 else "medium" if safety >= 0.3 else "risky",
+                "next_pick": mine[1] + 1 if len(mine) > 1 else None}
 
     @staticmethod
     def _cumulative(st: DraftState, likely: dict[str, float]) -> dict[str, float]:
@@ -332,27 +365,17 @@ class Dashboard:
             recs = [realistic] + [r for r in recs if r is not realistic]
         advice = self._advice(st, recs, probs)
         baseline, vs = versus_highest_projection(recs)
-        gamble = pick_gamble(recs, vs, baseline)
+        gamble = self._gamble(st, probs)
         if advice is not None:
-            g = vs.get(gamble.id) if gamble else None
             advice["safe"] = baseline.name if baseline else None
-            base_rec = next((r for r in recs if baseline and r.player.id == baseline.id), None)
-            advice["gamble"] = None if g is None else {
-                "name": gamble.name, "p_better": g.p_better, "avg_up": round(g.avg_up),
-                "p_worse": g.p_worse, "avg_down": round(g.avg_down), "diff": round(g.diff),
-                # what has to be true for it to pay off
-                "espn": baseline.name, "g_proj": round(gamble.proj_points), "g_espn": round(gamble.room_points),
-                "e_proj": round(baseline.proj_points), "e_espn": round(baseline.room_points),
-                "e_after": base_rec.p_avail_after if base_rec else None,
-                "e_now": base_rec.p_avail_now if base_rec else None,
-                "g_now": next((r.p_avail_now for r in recs if r.player.id == gamble.id), None),
-                "next_pick": st.my_next_picks()[1] + 1 if len(st.my_next_picks()) > 1 else None}
+            advice["gamble"] = gamble
             # Remember what was suggested for this pick of yours, for `review` afterwards.
             self._suggested[st.my_next_picks()[0]] = {
                 "target": recs[0].player.id if recs else None,
                 "espn": baseline.id if baseline else None,
-                "gamble": gamble.id if gamble else None,
-                "gamble_p_better": g.p_better if g else None, "gamble_diff": round(g.diff) if g else None}
+                "gamble": gamble["id"] if gamble else None,
+                "gamble_level": gamble["level"] if gamble else None,
+                "gamble_gain": gamble["gain"] if gamble else None}
 
         def vs_fields(r):
             v = vs.get(r.player.id)
@@ -369,15 +392,16 @@ class Dashboard:
             "value": round(r.exp_final_value),
             **vs_fields(r),
             "is_target": i == 0, "is_floor": r.player.id == floor, "p_best_up": self._cum.get(r.player.id),
-            "tag": "safe" if baseline and r.player.id == baseline.id
-                   else "gamble" if gamble and r.player.id == gamble.id else None,
+            "tag": "gamble" if gamble and r.player.id == gamble["id"]
+                   else "safe" if baseline and r.player.id == baseline.id else None,
         } for i, r in enumerate(recs)]
         if recs:
             self._target = (st.my_next_picks()[0], recs[0].player.id)
         # The rest of the board (not compared in the simulations), all by your projections.
         listed = {r.player.id for r in recs}
         board, _ = self._board(st, probs)
-        rows += [self._board_row(st, p, probs) for p in board if p.id not in listed]
+        rows += [{**self._board_row(st, p, probs), "tag": "gamble" if gamble and p.id == gamble["id"] else None}
+                 for p in board if p.id not in listed]
         rows.sort(key=lambda x: -x["proj"])
         return {
             "advice": advice,

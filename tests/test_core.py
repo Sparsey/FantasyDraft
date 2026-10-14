@@ -1203,3 +1203,21 @@ def test_now_or_never_players_are_always_compared():
     probs["soon"] = [1.0, 0.0]
     assert "soon" not in {p.id for p in candidate_pool(st, 4)}
     assert "soon" in {p.id for p in candidate_pool(st, 4, avail_probs=probs)}
+
+
+def test_gamble_rule_lasts_and_gain():
+    from fantasydraft.ui import Dashboard
+
+    # E: ESPN's pick; X: +100 by my numbers and won't last; W: +200 but will last (just wait on him)
+    pl = [P("E", "C", 2000), P("X", "PG", 2100), P("W", "SF", 2200), P("f", "PF", 1000)]
+    pl = [p if p.name != "E" else __import__("dataclasses").replace(p, espn_points=2500) for p in pl]
+    players = {p.id: p for p in pl}
+    lg = League([TeamProfile("me"), TeamProfile("a")], 0)
+    st = DraftState(lg, players)  # on the clock
+    probs = {"E": [1, 0.8], "X": [1, 0.1], "W": [1, 0.95], "f": [1, 1]}
+    g = Dashboard._gamble(st, probs)
+    assert g["name"] == "X" and g["espn"] == "E" and g["gain"] == 100 and g["level"] == "safe"
+    probs["E"] = [1, 0.1]
+    assert Dashboard._gamble(st, probs)["level"] == "risky"
+    probs["X"] = [1, 0.9]  # X would last too: nothing is now-or-never
+    assert Dashboard._gamble(st, probs) is None

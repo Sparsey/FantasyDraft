@@ -123,6 +123,8 @@
   tr.floor td { background: var(--accent-soft); }
   tr.floor td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   tr.top.floor td { background: var(--good-soft); }
+  .ptag.gamble.safe { color: var(--good); border-color: var(--good); background: var(--good-soft); }
+  .ptag.gamble.risky { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
   .ptag.fall { color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent); }
   .chg { font-size: 10.5px; font-weight: 700; margin-right: 4px; font-variant-numeric: tabular-nums; }
   .chg.up { color: var(--good); } .chg.dn { color: var(--bad); }
@@ -246,24 +248,24 @@ const projCells = (x) => {
     <td class="num"><b>${x.proj.toLocaleString()}</b></td><td class="num" title="${esc(t)}">${pill}</td>`;
 };
 function gambleWhy(g) {
-  if (!g || !g.espn || g.name === g.espn) return "";
+  if (!g) return "";
   const n = (x) => x.toLocaleString();
-  const why = [];
-  if (g.g_proj > g.e_proj && g.g_espn <= g.e_espn)
-    why.push(`A bet on your sources: they have ${g.name} ${n(g.g_proj)} vs ${g.espn} ${n(g.e_proj)}, ESPN the other way ` +
-             `(${n(g.g_espn)} vs ${n(g.e_espn)}). Pays off if your sources are right.`);
-  if (g.e_now != null && g.e_now < 0.6 && (g.g_now ?? 1) > g.e_now + 0.15)
-    why.push(`Timing: ${g.espn} (ESPN's pick) is only ${pct(g.e_now)} likely to reach your pick, ${g.name} ${pct(g.g_now)}.`);
-  if (!why.length) why.push(`Roster fit: ${g.name} adds more to your lineup than ${g.espn} over the rest of the draft.`);
-  if (g.e_after != null && g.next_pick && g.e_after >= 0.2) why.push(`${g.espn} is ${pct(g.e_after)} likely still there at #${g.next_pick}.`);
-  return `Ends better than ESPN's pick in ${pct(g.p_better)} of simulated drafts (${g.diff >= 0 ? "+" : ""}${g.diff} on average).\n` + why.join("\n");
+  const next = g.next_pick ? `#${g.next_pick}` : "your next pick";
+  return `Take ${g.name} now: +${n(g.gain)} by your projections over ESPN's pick ${g.espn} ` +
+    `(yours ${n(g.g_proj)} vs ${n(g.e_proj)}; ESPN ${n(g.g_espn)} vs ${n(g.e_espn)}).\n` +
+    `${g.name} is only ${pct(g.g_lasts)} likely to last to ${next}, so it's now or never.\n` +
+    `${g.level.toUpperCase()}: ${g.espn} is ${pct(g.e_lasts)} likely to still be there at ${next}` +
+    (g.level === "safe" ? ", so you'll probably get him then too." : g.level === "medium" ? "." : ", so passing on him probably means losing him.");
 }
 function tagTxt(x, r) {
   let t = "";
   if (x.is_target) t += `<span class="ptag tgt" title="The pick to aim for: best final roster on average, weighing how good he is against his chance of being there">TARGET</span>`;
   if (x.is_floor) t += `<span class="ptag flr" title="Your floor: whatever the teams before you take, you get someone at least this good (by your projections)">FLOOR</span>`;
   if (x.tag === "safe") t += `<span class="ptag safe" title="ESPN's pick: its top projection among players you can realistically get (what ESPN's board and autodraft go by)">ESPN</span>`;
-  if (x.tag === "gamble") t += `<span class="ptag gamble" title="${esc(gambleWhy(r && r.advice && r.advice.gamble) || "Ends with a better final roster than ESPN's pick in at least 40% of simulated drafts")}">GAMBLE</span>`;
+  if (x.tag === "gamble") {
+    const g = r && r.advice && r.advice.gamble;
+    t += `<span class="ptag gamble ${g ? g.level : ""}" title="${esc(gambleWhy(g))}">GAMBLE${g ? " · " + g.level : ""}</span>`;
+  }
   if (x.falling) t += `<span class="ptag fall" title="ESPN ranks him well before your pick, but he has a real chance of lasting to you">FALLING</span>`;
   return t;
 }
