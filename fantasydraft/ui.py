@@ -22,7 +22,7 @@ from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .analyze import analyze
+from .analyze import analyze, draft_scores
 from .drafters import add_to_counts, full_positions
 from .io import apply_log, apply_manager, is_placeholder, league_managers, load_state, match_manager
 from .learn import fit_teams
@@ -251,6 +251,7 @@ class Dashboard:
             pick = st.current_pick
             mine = st.my_next_picks()
             rosters = st.rosters()
+            scores = draft_scores(st)
             owners, bench = assign_lineup(rosters[lg.my_slot], lg.starting_slots)
             on_clock = lg.team_for_pick(pick) if not st.is_complete else None
             recent = []
@@ -295,6 +296,8 @@ class Dashboard:
                 "bench": [{"name": p.name, "pos": _pos(p), "proj": round(p.proj_points)} for p in bench],
                 "bench_slots": lg.roster_slots.get("BE", 0),
                 "teams": [{
+                    "score": round(scores[i]["value"]), "starters": round(scores[i]["starters"]),
+                    "starters_rank": 1 + sum(s["starters"] > scores[i]["starters"] for s in scores),
                     "slot": i, "name": tr.name(i), "strategy": t.strategy, "noise": t.noise,
                     "manager": t.manager, "view": t.view, "favorite_team": t.favorite_team,
                     "auto": i in st.auto_teams, "me": i == lg.my_slot, "count": len(rosters[i]),

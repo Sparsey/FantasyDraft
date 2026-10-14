@@ -830,3 +830,14 @@ def test_simulator_draws_unsure_teams_strategy_per_draft():
     rng = random.Random(1)
     draws = [sim.draw_profiles(rng)[0].strategy for _ in range(2000)]
     assert 0.55 < draws.count("rank") / 2000 < 0.65
+
+
+def test_rolling_draft_score():
+    from fantasydraft.analyze import draft_scores
+
+    pl = {n: P(n, "PG", pts) for n, pts in (("a", 1000), ("b", 900), ("c", 800), ("d", 700))}
+    lg = League([TeamProfile("x"), TeamProfile("y")], 0, roster_slots={"PG": 1, "BE": 1})
+    st = DraftState(lg, pl, ["b", "a", "c"])  # x reached for b; a fell to y
+    s = draft_scores(st)
+    assert s[0]["value"] == -100 + 0 and s[1]["value"] == +100
+    assert s[0]["starters"] == 900 and s[1]["starters"] == 1000

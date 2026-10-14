@@ -67,3 +67,29 @@ def analyze(state: DraftState) -> list[TeamTendency]:
             suggested = "adp"
         out.append(TeamTendency(league.teams[t].name, n, auto_counts[t], top_rank, adp, rank, top_pts, suggested))
     return out
+
+
+def draft_scores(state: DraftState) -> list[dict]:
+    """Rolling score per team, by your (consensus) projections.
+
+    "value": sum over the team's picks of (player's projected points − what
+    that pick number is normally worth), where pick k is worth the k-th highest
+    projection in the player pool. Positive = they've drafted more than their
+    slots are worth (players falling to them, others' mistakes); negative =
+    reaches. "starters": projected points of their best starting lineup now.
+    """
+    from .lineup import best_lineup
+
+    league = state.league
+    pool = sorted((p.proj_points for p in state.players.values() if not math.isnan(p.proj_points)),
+                  reverse=True)
+    out = [{"value": 0.0, "starters": 0.0} for _ in range(league.num_teams)]
+    for k, pid in enumerate(state.picks):
+        p = state.players.get(pid)
+        if p is None or p.name == f"Unknown player {p.id}" or k >= len(pool):
+            continue  # a pick we couldn't identify
+        out[league.team_for_pick(k)]["value"] += p.proj_points - pool[k]
+    for team, roster in enumerate(state.rosters()):
+        starters, _ = best_lineup(roster, league.starting_slots)
+        out[team]["starters"] = sum(p.proj_points for p in starters)
+    return out
