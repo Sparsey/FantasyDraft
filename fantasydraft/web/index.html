@@ -292,32 +292,24 @@ function renderStrip() {
   const key = JSON.stringify(T);
   if (key === stripKey) return;
   stripKey = key;
-  const pcls = (p) => p >= 0.3 ? "hi" : p >= 0.1 ? "mid" : "lo";
   const tag = (c) => c.auto ? '<span class="tag">AUTO</span>' : "";
+  // Past picks are left out: the ESPN draft room already shows them.
   let html = "";
-  if (T.accuracy) {
-    html += `<div class="card acc" title="Across ${T.accuracy.picks} opponent picks: how often the model's most likely player was the one taken, and the average chance it gave the actual pick">
-      <span>model's top guess right</span><b>${pct(T.accuracy.top_hit)}</b><span>avg chance of actual ${pct(T.accuracy.avg_p)}</span></div>`;
-  }
-  for (const c of T.past) {
-    const g = c.guess ? `Model's top guess: ${c.guess.name} (${pct(c.guess.p)})` : "No prediction recorded for this pick";
-    html += `<div class="card past${c.mine ? " mine" : ""}" title="${esc(g)}">
-      <div class="ch"><b>#${c.pick}</b><span class="tm">${esc(c.mine ? "You" : c.team)}</span>${tag(c)}</div>
-      <div class="act">${esc(c.name)}<span class="pos">${esc(c.pos)}</span></div>
-      ${c.p == null ? "" : `<div class="pg ${pcls(c.p)}">model gave ${pct(c.p)}</div>`}</div>`;
-  }
   for (const c of T.upcoming) {
     const head = `<div class="ch"><b>#${c.pick}</b><span class="tm">${c.now ? "ON CLOCK · " : ""}${esc(c.mine ? "YOU" : c.team)}</span>${tag(c)}</div>`;
     const body = c.mine && c.rec ? `<div class="act" title="Top recommendation">→ ${esc(c.rec)}</div>`
       : c.likely.map((x) => `<div class="ln"><span>${esc(x.name)}<span class="pos">${esc(x.pos)}</span></span><span>${pct(x.p)}</span></div>`).join("");
     html += `<div class="card${c.now ? " now" : ""}${c.mine ? " mine" : ""}" ${c.now ? 'id="nowcard"' : ""}>${head}${body}</div>`;
   }
+  if (T.accuracy) {
+    html += `<div class="card acc" title="Across ${T.accuracy.picks} opponent picks: how often the model's most likely player was the one taken, and the average chance it gave the actual pick">
+      <span>model's top guess right</span><b>${pct(T.accuracy.top_hit)}</b><span>avg chance of actual ${pct(T.accuracy.avg_p)}</span></div>`;
+  }
   const strip = $("strip");
   strip.innerHTML = html;
-  if (S.status.pick !== stripPick) {  // new pick: bring the card on the clock into view
+  if (S.status.pick !== stripPick) {  // new pick: start the strip at the card on the clock
     stripPick = S.status.pick;
-    const now = $("nowcard");
-    if (now) strip.scrollLeft = Math.max(0, now.offsetLeft - strip.offsetLeft - 2 * 146);
+    strip.scrollLeft = 0;
   }
 }
 
