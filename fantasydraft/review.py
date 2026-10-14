@@ -18,8 +18,20 @@ from dataclasses import replace
 from pathlib import Path
 
 from .io import is_placeholder
-from .lineup import team_value
+from .lineup import assign_lineup, over_targets, team_value
 from .models import DraftState
+
+
+def _breakdown(label: str, roster: list, lg) -> str:
+    owners, bench = assign_lineup(roster, lg.starting_slots)
+    starters = sum(p.proj_points for p in owners if p is not None)
+    bench_pts = sum(p.proj_points for p in bench)
+    over = over_targets(roster, lg)
+    penalty = lg.balance_penalty * sum(p.proj_points for p in over)
+    total = starters + lg.bench_weight * bench_pts - penalty
+    return (f"  {label:<36} starters {starters:>7,.0f} + bench {bench_pts:>6,.0f} x {lg.bench_weight:g}"
+            f" - over targets {penalty:>5,.0f} = {total:>7,.0f}   (all 13 added up: {starters + bench_pts:,.0f}; "
+            f"bench: {', '.join(p.name for p in bench) or '-'}; over: {', '.join(p.name for p in over) or '-'})")
 
 
 def review(state: DraftState, decisions_path: str | Path | None = None) -> str:
@@ -86,6 +98,11 @@ def review(state: DraftState, decisions_path: str | Path | None = None) -> str:
             f"  by ESPN's projections:        {mine_e:,.0f} vs {cf_e:,.0f}  ({mine_e - cf_e:+,.0f})"]
     if suggested:
         out.append(f"  you took the target {followed} of {len(suggested)} times, a GAMBLE {gambles} times")
+    out += ["", "How those numbers are made (H2H points: starters count in full, the bench at "
+                f"{lg.bench_weight:.0%}, players beyond your position targets lose {lg.balance_penalty:.0%}):"]
+    for label, r in (("you, by your projections", roster), ("ESPN-autodraft, by your projections", cf),
+                     ("you, by ESPN's", by_espn(roster)), ("ESPN-autodraft, by ESPN's", by_espn(cf))):
+        out.append(_breakdown(label, r, lg))
     out += ["", "If the first number is + and the second -, your picks are a bet that your sources beat "
                 "ESPN's numbers; whether they do only shows in real games.",
             "ESPN-autodraft roster: " + ", ".join(p.name for p in cf)]
