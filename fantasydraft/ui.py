@@ -278,6 +278,15 @@ class Dashboard:
                 "next_pick": mine[1] + 1}
 
     @staticmethod
+    def _choose_target(recs: list, floor_pts: float | None):
+        """recs come best plan first. Never below the floor (someone at least that
+        good is guaranteed); among the rest the best plan with an even or better
+        chance of being there, else the one most likely to be there."""
+        above = [r for r in recs if floor_pts is None or r.player.proj_points >= floor_pts] or recs
+        return next((r for r in above if r.p_avail_now >= TARGET_MIN_AVAIL), None) \
+            or max(above, key=lambda r: (r.p_avail_now, r.exp_final_value), default=None)
+
+    @staticmethod
     def _cumulative(st: DraftState, likely: dict[str, float]) -> dict[str, float]:
         """For each available player, the chance that the best player left for
         you at your pick (by your projections) is this player or someone better."""
@@ -358,9 +367,11 @@ class Dashboard:
         if probs is None:
             probs = availability(st, sims=availability_sims(self.sims), seed=1)
         recs = recommend(st, candidates=self.candidates, sims=self.sims, avail=probs)
-        # The target is the best plan among players with an even or better chance
-        # of being there; better players who probably won't last stay listed above.
-        realistic = next((r for r in recs if r.p_avail_now >= TARGET_MIN_AVAIL), None)
+        # The target: never below the floor (someone at least that good is
+        # guaranteed); among those, the best plan with an even or better chance of
+        # being there, else the one most likely to be there.
+        floor_id = self._floor(st)
+        realistic = self._choose_target(recs, st.players[floor_id].proj_points if floor_id else None)
         if realistic is not None:
             recs = [realistic] + [r for r in recs if r is not realistic]
         advice = self._advice(st, recs, probs)

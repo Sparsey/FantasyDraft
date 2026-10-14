@@ -1223,3 +1223,15 @@ def test_gamble_waits_on_the_target():
     probs["T"] = [1, 0.8]
     probs["X"] = [1, 0.9]  # X would last too: nothing is now-or-never
     assert Dashboard._gamble(st, probs, "T") is None
+
+def test_target_is_never_below_the_floor():
+    from fantasydraft.ui import Dashboard
+
+    def R(name, pts, p_now, value):
+        return Recommendation(Player(name, name, frozenset({"PG"}), pts), 0, p_now, 0, value)
+    # before the draft: each top player is under 50% to reach me, but one of them will
+    recs = [R("star1", 3000, 0.30, 100), R("star2", 2950, 0.35, 99), R("low", 2500, 0.95, 98)]
+    assert Dashboard._choose_target(recs, floor_pts=2900).player.name == "star2"  # most likely above the floor
+    assert Dashboard._choose_target(recs, floor_pts=None).player.name == "low"  # (no floor known: old rule)
+    recs[0] = R("star1", 3000, 0.60, 100)
+    assert Dashboard._choose_target(recs, floor_pts=2900).player.name == "star1"
