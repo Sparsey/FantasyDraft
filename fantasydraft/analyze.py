@@ -38,7 +38,7 @@ def analyze(state: DraftState) -> list[TeamTendency]:
             continue
         avail = [q for q in state.players.values() if q.id not in taken]
         best_rank = min(avail, key=lambda q: base_key("rank", q))
-        best_pts = max(avail, key=lambda q: q.proj_points)
+        best_pts = max(avail, key=lambda q: q.room_points)
         stats = per_team[team]
         stats["top_rank"].append(float(best_rank.id == pid))
         stats["top_pts"].append(float(best_pts.id == pid))

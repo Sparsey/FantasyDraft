@@ -98,6 +98,17 @@ class EspnClient:
         return out
 
     @staticmethod
+    def scoring(league: dict) -> dict[str, float]:
+        """League fantasy scoring as {stat: points}, for stats the sources module knows.
+
+        ESPN basketball stat ids (as used by community ESPN libraries; verify with
+        `sources`, whose "median vs ESPN" should be close to 1.00)."""
+        ids = {0: "PTS", 1: "BLK", 2: "STL", 3: "AST", 6: "REB", 11: "TO",
+               13: "FGM", 14: "FGA", 15: "FTM", 16: "FTA", 17: "3PM"}
+        items = league.get("settings", {}).get("scoringSettings", {}).get("scoringItems", [])
+        return {ids[i["statId"]]: float(i.get("points", 0)) for i in items if i.get("statId") in ids}
+
+    @staticmethod
     def picks(league: dict) -> list[LivePick]:
         raw = league.get("draftDetail", {}).get("picks", [])
         return [

@@ -53,6 +53,33 @@ instead. `python -m fantasydraft capture-ranks <capture.jsonl> --league
 league.json` reads the same rankings out of a draft-room capture and
 compares them with your sheet.
 
+## Extra projection sources
+
+Other sites' projections, averaged with ESPN's, become *your* value for each
+player. Opponents are still modelled on ESPN's numbers, because that's what
+the draft room shows them. The gap between the two is your edge.
+
+1. Add a tab per source (e.g. `src_hashtag`). Either paste the site's
+   projections table into A1, or use
+   `=IMPORTHTML("https://hashtagbasketball.com/fantasy-basketball-projections", "table", 1)`
+   (try 2 or 3 if 1 is the wrong table).
+2. Copy that tab's link (it has `#gid=...` for the tab) into your league file:
+   ```json
+   "sources": {"hashtag": "https://docs.google.com/spreadsheets/d/<id>/edit#gid=<tab gid>"}
+   ```
+3. Check it: `python -m fantasydraft sources --league league.json`. It shows
+   how many players matched, any scoring stats the source lacks, how the
+   source compares with ESPN overall ("median vs ESPN" should be near 1.00
+   when the scoring matches), and the players ESPN under- and overrates.
+
+Columns are found by header: player name, GP, PTS, REB/TREB, AST, STL, BLK,
+TO, 3PM (even when Sheets turns it into "3:00 PM"), and FG%/FT% as
+`0.573(10.5/18.3)` or separate FGM/FGA/FTM/FTA. Per-game stats are
+multiplied by GP. Scoring defaults to ESPN's standard points scoring. Set
+`"scoring"` in the league file (`fetch-league` fills it from your league)
+if yours differs. A `my_proj` value in the players tab still overrides
+everything.
+
 ## The players tab
 
 The script uses the tab named `players`, or the first tab if there isn't one.

@@ -493,3 +493,26 @@ def test_draft_room_ranks_from_capture_and_merge():
     info = [{"id": 7, "player": {"id": 7, "fullName": "A B", "eligibleSlots": [0], "draftRanksByRankType": {}}}]
     assert merge_draft_ranks(info, body["players"]) == 1
     assert parse_player(info[0], 2027).espn_rank == 4.0
+
+
+def test_hashtag_style_source_to_league_points():
+    from fantasydraft.sources import apply_sources, clean_name, read_source
+
+    assert clean_name("Shai Gilgeous-AlexanderS.Gilgeous-Alexander") == "Shai Gilgeous-Alexander"
+    assert clean_name("Karl-Anthony TownsK.Towns") == "Karl-Anthony Towns"
+    src = str(ROOT / "tests" / "data" / "hashtag_sample.csv")
+    lines = read_source(src)
+    assert [l.name for l in lines][:2] == ["Nikola Jokic", "Victor Wembanyama"]  # repeated header skipped
+    assert len(lines) == 5
+    jokic = lines[0]
+    assert jokic.stats["3PM"] == pytest.approx(1.8 * 72) and jokic.stats["FGA"] == pytest.approx(18.3 * 72)
+
+    players = {"j": Player("j", "Nikola Jokić", frozenset({"C"}), 4838.0, 1, espn_points=4838.0),
+               "w": Player("w", "Victor Wembanyama", frozenset({"C"}), 4000.0, 4, espn_points=4000.0),
+               "x": Player("x", "Nobody Else", frozenset({"PG"}), 1000.0, 300, espn_points=1000.0, overridden=False)}
+    reports = apply_sources(players, {"hashtag": src})
+    assert reports[0].matched == 2 and not reports[0].calibrated
+    # Jokic: ESPN 4838, Hashtag ~4853 under ESPN default points scoring -> consensus ~4845
+    assert players["j"].proj_points == pytest.approx((4838 + 67.4 * 72) / 2, abs=5)
+    assert players["j"].room_points == 4838.0  # opponents still see ESPN
+    assert players["x"].proj_points == 1000.0 and len(players["x"].sources) == 1

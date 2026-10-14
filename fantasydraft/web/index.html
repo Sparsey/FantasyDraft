@@ -117,6 +117,7 @@
   .bar i b { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
   .bar.hi i b { background: var(--good); } .bar.lo i b { background: var(--bad); }
   .bar span { min-width: 34px; text-align: right; }
+  td.up { color: var(--good); font-weight: 600; } td.dn { color: var(--bad); }
   .add { padding: 0 7px; font-size: 12px; color: var(--muted); }
   .suggest { padding: 7px 12px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
   .suggest b { color: var(--ink); }
@@ -188,7 +189,7 @@
 <main>
   <section class="panel p-recs">
     <div class="head">
-      <div class="tabs"><button class="on" data-tab="recs">Recommendations</button><button data-tab="avail">Best available</button></div>
+      <div class="tabs"><button class="on" data-tab="recs">Recommendations</button><button data-tab="avail">Best available</button><button data-tab="under" id="undertab" hidden>ESPN underrates</button></div>
       <span class="spin" id="spin"></span>
     </div>
     <div class="tbl" id="tablebody"></div>
@@ -230,6 +231,11 @@ function bar(p) {
   const cls = p >= 0.7 ? "hi" : p <= 0.3 ? "lo" : "";
   return `<span class="bar ${cls}"><i><b style="width:${Math.round(p * 100)}%"></b></i><span>${pct(p)}</span></span>`;
 }
+const vsEspn = (x) => {
+  if (x.vs_espn == null || !x.sources || x.sources.length < 2) return '<td class="num muted">–</td>';
+  const t = x.sources.map(([n, v]) => n + " " + v.toLocaleString()).join(" · ");
+  return `<td class="num ${x.vs_espn > 0 ? "up" : x.vs_espn < 0 ? "dn" : "muted"}" title="${esc(t)}">${x.vs_espn > 0 ? "+" : ""}${x.vs_espn}</td>`;
+};
 const addBtn = (id) => `<button class="add" data-pick="${esc(id)}" title="Record as the next pick">+</button>`;
 
 async function api(path, body) {
@@ -269,6 +275,7 @@ function render() {
 
   renderStrip();
   const r = S.result || {};
+  $("undertab").hidden = !r.has_sources;
   $("spin").textContent = S.computing ? "updating…" : r.error || "";
   renderTable(r);
   const sg = $("suggest");
@@ -366,24 +373,37 @@ function renderTable(r) {
     if (!r.recs) { body.innerHTML = `<div class="empty-note">Working out recommendations…</div>`; return; }
     if (!r.recs.length) { body.innerHTML = `<div class="empty-note">Nothing to recommend — your draft is done.</div>`; return; }
     body.innerHTML = `<table><thead><tr><th>Player</th><th class="num">Rank</th><th class="num">Proj</th>
+      <th class="num" title="Your consensus projection minus ESPN's (hover a value for each source)">vs ESPN</th>
       <th class="num" title="Immediate gain to your lineup, after roster balance">Gain</th>
       <th class="num" title="Chance the player is still there at your next pick">At my pick</th>
       <th class="num" title="Chance the player lasts to the pick after that, if you pass">Lasts</th>
       <th class="num" title="Projected final roster value vs the best option (averaged over simulated drafts)">vs best</th><th></th></tr></thead><tbody>` +
       r.recs.map((x, i) => `<tr class="${i === 0 ? "top" : ""}" title="Final roster value ${x.value.toLocaleString()}">
         <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span></td>
-        <td class="num muted">${x.rank ?? "–"}</td><td class="num">${x.proj}</td>
+        <td class="num muted">${x.rank ?? "–"}</td><td class="num">${x.proj}</td>${vsEspn(x)}
         <td class="num ${x.gain < x.proj ? "muted" : ""}">+${x.gain}</td>
         <td class="num">${bar(x.p_now)}</td><td class="num">${bar(x.p_after)}</td>
         <td class="num vs ${x.vs_best < 0 ? "neg" : ""}">${x.vs_best === 0 ? "best" : x.vs_best}</td>
         <td>${addBtn(x.id)}</td></tr>`).join("") + `</tbody></table>`;
+  } else if (tab === "under") {
+    const U = r.underrated || [];
+    if (!U.length) { body.innerHTML = `<div class="empty-note">No available player that your sources rank well above ESPN.</div>`; return; }
+    const mine = S.status.my_picks.slice(0, 2);
+    body.innerHTML = `<table><thead><tr><th>Player</th><th class="num" title="Rank among available players by your consensus">Mine</th><th class="num" title="Rank among available players by ESPN's projection (what the room drafts by)">ESPN</th>
+      <th class="num">Consensus</th><th class="num">ESPN proj</th><th class="num" title="How much the sources disagree">±</th>` +
+      mine.map((m) => `<th class="num">At #${m}</th>`).join("") + `<th></th></tr></thead><tbody>` +
+      U.map((x) => `<tr title="${esc(x.sources.map(([n, v]) => n + " " + v.toLocaleString()).join(" · "))}">
+        <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span></td>
+        <td class="num"><b>${x.my_rank}</b></td><td class="num muted">${x.espn_rank}</td><td class="num">${x.proj}</td>
+        <td class="num muted">${x.espn}</td><td class="num muted">${x.spread}</td>` +
+        mine.map((_, k) => `<td class="num">${bar(x.p[k])}</td>`).join("") + `<td>${addBtn(x.id)}</td></tr>`).join("") + `</tbody></table>`;
   } else {
     if (!r.available) { body.innerHTML = `<div class="empty-note">Working…</div>`; return; }
     const mine = S.status.my_picks.slice(0, 3);
-    body.innerHTML = `<table><thead><tr><th>Player</th><th class="num">Rank</th><th class="num">ADP</th><th class="num">Proj</th>` +
+    body.innerHTML = `<table><thead><tr><th>Player</th><th class="num">Rank</th><th class="num">ADP</th><th class="num">Proj</th><th class="num">vs ESPN</th>` +
       mine.map((m) => `<th class="num">At #${m}</th>`).join("") + `<th></th></tr></thead><tbody>` +
       r.available.map((x) => `<tr><td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span></td>
-        <td class="num muted">${x.rank ?? "–"}</td><td class="num muted">${x.adp != null ? Math.round(x.adp * 10) / 10 : "–"}</td><td class="num">${x.proj}</td>` +
+        <td class="num muted">${x.rank ?? "–"}</td><td class="num muted">${x.adp != null ? Math.round(x.adp * 10) / 10 : "–"}</td><td class="num">${x.proj}</td>${vsEspn(x)}` +
         mine.map((_, k) => `<td class="num">${bar(x.p[k])}</td>`).join("") + `<td>${addBtn(x.id)}</td></tr>`).join("") + `</tbody></table>`;
   }
 }

@@ -125,15 +125,37 @@ class Dashboard:
                 "id": r.player.id, "name": r.player.name, "pos": _pos(r.player),
                 "team": r.player.nba_team, "proj": round(r.player.proj_points),
                 "rank": _num(r.player.espn_rank), "gain": round(r.marginal_now),
+                "vs_espn": round(r.player.proj_points - r.player.room_points),
+                "sources": [[n, round(v)] for n, v in r.player.sources],
                 "p_now": r.p_avail_now, "p_after": r.p_avail_after,
                 "value": round(r.exp_final_value), "vs_best": round(r.exp_final_value - best),
             } for r in recs],
             "available": [{
                 "id": p.id, "name": p.name, "pos": _pos(p), "team": p.nba_team,
                 "proj": round(p.proj_points), "rank": _num(p.espn_rank), "adp": _num(p.adp),
+                "vs_espn": round(p.proj_points - p.room_points), "spread": round(p.spread),
+                "sources": [[n, round(v)] for n, v in p.sources],
                 "p": probs.get(p.id, [])[:3],
             } for p in top],
+            "underrated": self._underrated(st, probs),
+            "has_sources": any(len(p.sources) > 1 for p in st.players.values()),
         }
+
+    def _underrated(self, st: DraftState, probs: dict) -> list[dict]:
+        """Available players the consensus ranks well above ESPN (the room's view)."""
+        avail = [p for p in st.available() if not is_placeholder(p) and len(p.sources) > 1]
+        if not avail:
+            return []
+        mine = {p.id: i + 1 for i, p in enumerate(sorted(avail, key=lambda p: -p.proj_points))}
+        room = {p.id: i + 1 for i, p in enumerate(sorted(avail, key=lambda p: -p.room_points))}
+        rows = [p for p in avail if mine[p.id] <= 60 and room[p.id] - mine[p.id] >= 2]
+        rows.sort(key=lambda p: mine[p.id] - room[p.id])
+        return [{
+            "id": p.id, "name": p.name, "pos": _pos(p), "team": p.nba_team,
+            "proj": round(p.proj_points), "espn": round(p.room_points), "my_rank": mine[p.id],
+            "espn_rank": room[p.id], "spread": round(p.spread),
+            "sources": [[n, round(v)] for n, v in p.sources], "p": probs.get(p.id, [])[:3],
+        } for p in rows[:25]]
 
     def snapshot(self) -> dict:
         with self.lock:

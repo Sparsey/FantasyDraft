@@ -77,6 +77,7 @@ def load_players(source: str | Path) -> dict[str, Player]:
         if not name or _truthy(row.get("ignore")):
             continue
         proj = row.get("my_proj") or row.get("proj_points")
+        espn = row.get("proj_points") or proj
         if not proj:
             skipped.append(name)
             continue
@@ -87,6 +88,8 @@ def load_players(source: str | Path) -> dict[str, Player]:
                 name=name,
                 positions=parse_positions(row.get("positions", "")),
                 proj_points=_float(proj),
+                espn_points=_float(espn),
+                overridden=bool(row.get("my_proj")),
                 espn_rank=_float(row.get("espn_rank")),
                 adp=_float(row.get("adp")),
                 nba_team=row.get("nba_team", ""),
@@ -330,11 +333,32 @@ def players_source(league_path: str | Path) -> str:
     return cfg.get("players", "data/players.csv")
 
 
+def league_sources(league_path: str | Path) -> tuple[dict[str, str], dict[str, float] | None]:
+    """The league file's extra projection sources ({name: tab link/path}) and scoring."""
+    cfg = json.loads(Path(league_path).read_text(encoding="utf-8"))
+    return cfg.get("sources") or {}, cfg.get("scoring")
+
+
+def apply_league_sources(players: dict[str, Player], league_path: str | Path) -> list:
+    sources, scoring = league_sources(league_path)
+    if not sources:
+        return []
+    from .sources import apply_sources
+
+    reports = apply_sources(players, sources, scoring)
+    for r in reports:
+        print(f"source {r.name}: {r.matched}/{r.rows} players matched"
+              + (f" (rescaled x{1 / r.scale:.2f}: missing {', '.join(r.missing_stats)})" if r.calibrated else ""),
+              file=sys.stderr)
+    return reports
+
+
 def load_state(players_path: str | Path | None, league_path: str | Path, picks_path: str | Path | None,
                players: dict[str, Player] | None = None) -> DraftState:
     """Players (unless already loaded and passed in), league and picks -> DraftState."""
     if players is None:
         players = load_players(players_path or players_source(league_path))
+        apply_league_sources(players, league_path)
     league = load_league(league_path)
     state = DraftState(league=league, players=players)
     if picks_path:

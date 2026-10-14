@@ -398,6 +398,8 @@ def cmd_fetch_league(args) -> None:
         "my_team": existing.get("my_team", 1),
         "bench_weight": existing.get("bench_weight", 0.4),
         "roster_slots": client.roster_slots(data),
+        "scoring": client.scoring(data) or existing.get("scoring"),
+        "sources": existing.get("sources", {}),
         "espn_team_ids": client.pick_order(data),
         "teams": [old.get(names[tid], {"name": names[tid], "strategy": "unknown", "noise": 0.2})
                   for tid in client.pick_order(data)],
@@ -481,6 +483,37 @@ def cmd_room(args) -> None:
             print(f"Draft page connected: {e.get('url', '')}")
 
     serve(args.out, args.port, on_event=on_event, quiet=True)
+
+
+def cmd_sources(args) -> None:
+    """Check extra projection sources and list who ESPN under/overrates."""
+    from .io import apply_league_sources, load_players, players_source
+    from .sources import underrated
+
+    players = load_players(args.players or players_source(args.league))
+    reports = apply_league_sources(players, args.league)
+    if not reports:
+        sys.exit(f'{args.league} has no "sources". Add e.g. "sources": {{"hashtag": "<link to the tab>"}}')
+    for r in reports:
+        print(f"\n{r.name}: {r.rows} rows, {r.matched} matched to your players"
+              f" | median vs ESPN: {r.scale:.2f}x" + (" (rescaled to ESPN)" if r.calibrated else ""))
+        if r.missing_stats:
+            print(f"  missing scoring stats: {', '.join(r.missing_stats)}")
+        if r.unmatched:
+            print(f"  not matched ({len(r.unmatched)}): {', '.join(r.unmatched[:12])}"
+                  + (" ..." if len(r.unmatched) > 12 else ""))
+    rows = underrated(players, top=args.top)
+
+    def line(p, mine, espn):
+        srcs = "  ".join(f"{n} {v:,.0f}" for n, v in p.sources)
+        return [p.name, "/".join(sorted(p.positions)), mine, espn, f"{espn - mine:+d}",
+                f"{p.proj_points:,.0f}", f"{p.proj_points - p.room_points:+,.0f}", f"±{p.spread:,.0f}", srcs]
+
+    head = ["player", "pos", "my rank", "ESPN rank", "gap", "consensus", "vs ESPN", "spread", "by source"]
+    print(f"\nESPN UNDERRATES (top {args.top} by consensus; you'd rank them higher than ESPN does):")
+    print(_table([line(*r) for r in rows if r[2] - r[1] > 0][:args.show], head))
+    print(f"\nESPN OVERRATES:")
+    print(_table([line(*r) for r in reversed(rows) if r[1] - r[2] > 0][:args.show], head))
 
 
 def cmd_capture_ranks(args) -> None:
@@ -649,6 +682,13 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--out", default="capture.jsonl", help="raw event log (for troubleshooting)")
     p.add_argument("--port", type=int, default=8765)
     p.set_defaults(func=cmd_room)
+
+    p = sub.add_parser("sources", help="check extra projection sources; who ESPN under/overrates")
+    p.add_argument("--league", default="league.json")
+    p.add_argument("--players", help="players CSV or sheet link (default: league file's)")
+    p.add_argument("--top", type=int, default=150, help="consider the top N players by consensus")
+    p.add_argument("--show", type=int, default=15)
+    p.set_defaults(func=cmd_sources)
 
     p = sub.add_parser("capture-ranks", help="extract the draft room's player rankings from a capture file")
     p.add_argument("capture", help="capture .jsonl recorded while a draft room was open")

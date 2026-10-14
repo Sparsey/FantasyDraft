@@ -26,7 +26,7 @@ def base_key(strategy: str, p: Player) -> float:
     if strategy == "adp":
         return _finite(p.adp, _finite(p.espn_rank, 10_000.0))
     if strategy in ("points", "balanced"):
-        return -p.proj_points
+        return -p.room_points  # opponents see ESPN's projections, not mine
     raise ValueError(strategy)
 
 
@@ -47,7 +47,7 @@ def need_multiplier(p: Player, counts: dict[str, float], targets: dict[str, int]
 
 
 def balanced_order(pool: Sequence[Player], counts: dict[str, float], targets: dict[str, int]) -> list[Player]:
-    return sorted(pool, key=lambda p: -p.proj_points * need_multiplier(p, counts, targets))
+    return sorted(pool, key=lambda p: -p.room_points * need_multiplier(p, counts, targets))
 
 
 def order_for(strategy: str, players: Iterable[Player]) -> list[Player]:

@@ -37,6 +37,17 @@ class Player:
     espn_rank: float = float("inf")
     adp: float = float("inf")
     nba_team: str = ""
+    # ESPN's own projection (what the draft room shows). proj_points is *my*
+    # value: ESPN's, a my_proj override, or a consensus of several sources.
+    espn_points: float = float("nan")
+    overridden: bool = False  # my_proj set in the sheet
+    sources: tuple[tuple[str, float], ...] = ()  # (source name, season points) incl. ESPN
+    spread: float = 0.0  # disagreement between sources (std dev of season points)
+
+    @property
+    def room_points(self) -> float:
+        """Projection opponents see in the ESPN draft room."""
+        return self.espn_points if self.espn_points == self.espn_points else self.proj_points
 
     def __repr__(self) -> str:  # keep debug output short
         return f"Player({self.name!r}, {'/'.join(sorted(self.positions))}, {self.proj_points:.0f})"
