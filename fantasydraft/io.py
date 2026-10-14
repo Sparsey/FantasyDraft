@@ -170,7 +170,7 @@ def _profile(name: str, fields: dict, manager: str = "") -> TeamProfile:
     return TeamProfile(
         name=name,
         strategy=fields.get("strategy", "unknown"),
-        noise=float(fields.get("noise", 0.15)),
+        noise=float(fields.get("noise", 0.3)),
         spread=int(fields.get("spread", 8)),
         favorites={k: float(v) for k, v in fields.get("favorites", {}).items()},
         view=fields.get("view", "espn"),
@@ -252,8 +252,9 @@ def load_league(path: str | Path) -> League:
         **lineup_settings(cfg),
         position_targets=cfg.get("position_targets"),
         learn_noise=bool(cfg.get("learn_noise", True)),
-        position_bias=float(cfg.get("position_bias", 0.35)),
+        position_bias=float(cfg.get("position_bias", 0.1)),
         start_auto=start_auto,
+        autodraft_top=float(cfg.get("autodraft_top", 1.0)),
     )
 
 

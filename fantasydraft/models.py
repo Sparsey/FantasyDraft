@@ -58,8 +58,10 @@ class TeamProfile:
     """How an opponent is expected to draft.
 
     strategy:
-      - "auto":   takes the best available player by `espn_rank` (no noise) —
-                  models ESPN autodraft.
+      - "auto":   ESPN autodraft: the best available player by `espn_rank`,
+                  except that it passes him with chance 1 - auto_top (and the
+                  next one with the same chance, and so on). auto_top is learned
+                  from the draft's autodraft picks (ESPN mock rooms: about 0.5).
       - "adp":    drafts roughly by average draft position, with noise.
       - "rank":   drafts roughly by ESPN rank, with noise (a human following
                   the ESPN draft board).
@@ -82,7 +84,7 @@ class TeamProfile:
 
     name: str
     strategy: str = "unknown"
-    noise: float = 0.15
+    noise: float = 0.3  # people in ESPN mocks: about 0.3 (fantasydraft study)
     favorites: dict[str, float] = field(default_factory=dict)
     spread: int = 8
     # Whose projections a "points"/"balanced" drafter believes: ESPN's (what
@@ -91,6 +93,7 @@ class TeamProfile:
     favorite_team: str = ""  # NBA team abbreviation they're a fan of, e.g. "BOS"
     team_boost: float = 0.0  # draft spots earlier they take that team's players
     manager: str = ""  # the person (from the league file's "managers")
+    auto_top: float = 1.0  # "auto": chance it takes the top of ESPN's list (see above)
 
     VALID_STRATEGIES = ("unknown", "auto", "adp", "rank", "points", "balanced", "feel")
     VALID_VIEWS = ("espn", "consensus", "mix")
@@ -127,10 +130,14 @@ class League:
     learn_noise: bool = True
     # Opponents (not on autodraft) avoid positions they've already filled to
     # the targets: such players' draft slot is pushed back by this fraction.
-    position_bias: float = 0.35
+    position_bias: float = 0.1  # mocks: drafters barely avoid filled positions (fantasydraft study)
     # Teams that start the draft on autodraft (saved strategy "auto" in the
     # league file). It's the same flag as the live autodraft switch.
     start_auto: frozenset[int] = frozenset()
+    # Before seeing any autodraft picks: the chance autodraft takes the top of
+    # ESPN's list (then learned from its picks). ESPN's autopick in a real
+    # league: always (1.0). ESPN mock rooms: about half the time (0.5).
+    autodraft_top: float = 1.0
     # Share of games a player misses: a position with only one player who can
     # play it loses that much of his value (nobody covers the slot).
     cover_rate: float = 0.03

@@ -51,7 +51,7 @@ def _flat(lg: League, strategy: str) -> League:
                            team_boost=0.0) for t in lg.teams],
                   lg.my_slot, roster_slots=dict(lg.roster_slots), bench_weight=lg.bench_weight,
                   position_targets=lg.position_targets, balance_penalty=lg.balance_penalty,
-                  learn_noise=False, position_bias=lg.position_bias, start_auto=lg.start_auto)
+                  learn_noise=False, position_bias=lg.position_bias, start_auto=lg.start_auto, autodraft_top=lg.autodraft_top)
 
 
 def check(state: DraftState, entries: list[tuple], sims: int = 150) -> str:

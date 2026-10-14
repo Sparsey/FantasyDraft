@@ -14,7 +14,9 @@ CANDIDATE_POOL = 30
 
 # Standard normal draws, looked up by a uniform random number: much faster
 # than random.gauss in the simulation's innermost loop.
-_NORMALS = [random.Random(12345).gauss(0.0, 1.0) for _ in range(8192)]
+_rng = random.Random(12345)
+_NORMALS = [_rng.gauss(0.0, 1.0) for _ in range(8192)]
+del _rng
 
 
 def _finite(x: float, fallback: float) -> float:
@@ -105,9 +107,11 @@ def choose_pick(
         raise ValueError("no players available")
     strategy = profile.strategy
     if strategy == "auto":
-        if not profile.noise:
-            return ordered[0]
-        bias = 0.0  # autodraft goes by ESPN's list (with the randomness learned from its picks)
+        # ESPN's list, top first; each player is passed with chance 1 - auto_top.
+        i, top = 0, profile.auto_top
+        while top < 1.0 and i < len(ordered) - 1 and rng.random() >= top:
+            i += 1
+        return ordered[i]
     if strategy == "feel":
         top = list(ordered[:max(profile.spread, 1)])
         weights = feel_weights(len(top))

@@ -144,7 +144,7 @@ def fit_teams(state: DraftState) -> dict[int, TeamFit]:
     out: dict[int, TeamFit] = {}
     for team, rows in _pick_evidence(state).items():
         profile = league.teams[team]
-        prior_noise = profile.noise if profile.noise > 0 else 0.15
+        prior_noise = profile.noise if profile.noise > 0 else 0.3
         log_prior = [-((math.log(n) - math.log(prior_noise)) ** 2) / (2 * PRIOR_SPREAD ** 2) for n in NOISE_GRID]
         if not rows:
             continue
@@ -221,67 +221,34 @@ def learned_profiles(state: DraftState) -> dict[int, TeamProfile]:
     return out
 
 
-AUTO_PRIOR_NOISE = 0.04  # what we expect before seeing any autodraft picks: almost exactly ESPN's list
-# Lists ESPN's autodraft might be following, and how likely each is before
-# seeing any autodraft picks. Mostly ESPN's rank, but mock-room autodrafters
-# vary: some lean on ADP or on projected points.
-AUTO_PRIOR = {"rank": 0.7, "adp": 0.15, "points": 0.15}
-AUTO_ORDERS = tuple(AUTO_PRIOR)
+# Autodraft takes the top of ESPN's list with chance auto_top, else the next
+# one with that chance, and so on. In ESPN mock rooms it took the top 50% of
+# the time, the 2nd 23%, the 3rd 12% (460 autodraft picks in 9 mocks):
+# auto_top about 0.5. The league's autodraft_top (the starting guess) counts
+# as AUTO_PRIOR_PICKS picks.
+AUTO_PRIOR_PICKS = 6
 
 
-def _auto_strategy(s: str, noise: float) -> str:
-    return "auto" if s == "rank" and noise < 0.03 else s
-
-
-def fit_auto(state: DraftState, min_picks: int = 3) -> list[tuple[float, str, float]]:
-    """The mix of lists this draft's autodraft teams follow: (probability,
-    strategy, noise), where strategy is "auto"/"rank" (ESPN's rank), "adp" or
-    "points" (ESPN's projections) and noise is how loosely (same scale as a
-    person's randomness). Pooled over all autodraft picks; each simulated
-    autodraft team draws one. Before enough picks: the prior mix."""
+def fit_auto(state: DraftState) -> float:
+    """auto_top for this draft's autodraft teams, from their picks so far: the
+    chance they take the top available player on ESPN's list (pooled over all
+    autodraft teams; a geometric fit, so number of picks / sum of the places,
+    with the league's autodraft_top counting as AUTO_PRIOR_PICKS picks)."""
     league = state.league
-    players = list(state.players.values())
-    orders = {s: order_for(BASE_LIST[s], players) for s in AUTO_ORDERS}
-    rows: list[dict[str, tuple[float, ...]]] = []
+    order = order_for("auto", list(state.players.values()))
     taken: set[str] = set()
+    n, places = 0, 0
     for pick, pid in enumerate(state.picks):
         if pick in state.auto_picks and league.team_for_pick(pick) != league.my_slot:
-            row = {}
-            for s, order in orders.items():
-                pool = []
-                for p in order:
-                    if p.id not in taken:
-                        pool.append(p)
-                        if len(pool) == CANDIDATE_POOL:
-                            break
-                ids = [p.id for p in pool]
-                chosen = ids.index(pid) if pid in ids else len(ids)
-                if s == "points":
-                    keys = tuple(pick + i + 1.0 for i in range(len(pool)))
-                else:
-                    keys = tuple(max(base_key(s, p), 0.1) for p in pool)
-                key = ("auto:" + s, pick, chosen, keys)
-                if key not in _CACHE:
-                    _CACHE[key] = _choice_likelihoods(keys, chosen, seed=pick * 7 + len(s))
-                row[s] = _CACHE[key]
-            rows.append(row)
+            place = 0
+            for p in order:
+                if p.id not in taken:
+                    place += 1
+                    if p.id == pid or place == CANDIDATE_POOL:
+                        break
+            n += 1
+            places += place
         taken.add(pid)
-    if len(rows) < min_picks:
-        return [(AUTO_PRIOR["rank"], "auto", 0.0)] + [
-            (AUTO_PRIOR[s], s, AUTO_PRIOR_NOISE) for s in AUTO_ORDERS if s != "rank"]
-    log_prior = [-((math.log(n) - math.log(AUTO_PRIOR_NOISE)) ** 2) / (2 * PRIOR_SPREAD ** 2) for n in NOISE_GRID]
-    fits = {}
-    for s in AUTO_ORDERS:
-        logw = [lp + sum(math.log(r[s][g]) for r in rows) for g, lp in enumerate(log_prior)]
-        top = max(logw)
-        w = [math.exp(x - top) for x in logw]
-        evidence = top + math.log(sum(w) / sum(math.exp(lp) for lp in log_prior))
-        noise = math.exp(sum(wi * math.log(n) for wi, n in zip(w, NOISE_GRID)) / sum(w))
-        fits[s] = (math.log(AUTO_PRIOR[s]) + evidence, noise)
-    top = max(e for e, _ in fits.values())
-    probs = {s: math.exp(e - top) for s, (e, _) in fits.items()}
-    total = sum(probs.values())
-    probs = {s: max(p / total, MIX_FLOOR) for s, p in probs.items()}  # autodrafters vary: keep some of each
-    total = sum(probs.values())
-    return sorted(((round(probs[s] / total, 3), _auto_strategy(s, n), round(n, 3))
-                   for s, (_, n) in fits.items()), reverse=True)
+    prior = min(max(league.autodraft_top, 0.05), 1.0)
+    top = (n + AUTO_PRIOR_PICKS) / (places + AUTO_PRIOR_PICKS / prior)
+    return round(min(top, 1.0), 3)

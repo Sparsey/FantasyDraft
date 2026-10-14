@@ -35,14 +35,18 @@ class Simulator:
 
             self.mixes = learned_mixes(state)
             self.learned = {t: max(opts, key=lambda o: o[0])[1] for t, opts in self.mixes.items()}
+        # Teams we know nothing about yet: in your mocks people followed ADP and
+        # ESPN's rank about equally often, so each simulated draft picks one.
+        for t, prof in enumerate(state.league.teams):
+            if prof.strategy == "unknown" and t not in self.mixes and t != state.league.my_slot:
+                self.mixes[t] = [(0.5, replace(prof, strategy="adp")), (0.5, replace(prof, strategy="rank"))]
+                self.learned[t] = self.mixes[t][0][1]
         self.league = state.league
         self.slots = self.league.starting_slots
-        # The lists autodraft teams follow and how closely, learned from this
-        # draft's autodraft picks: [(probability, strategy, noise)]. Each
-        # simulated draft, each autodraft team draws one.
+        # How often this draft's autodraft teams take the top of ESPN's list.
         from .learn import fit_auto
 
-        self.auto_mix = fit_auto(state)
+        self.auto_top = fit_auto(state)
         self._values: dict[frozenset, float] = {}  # my roster (player ids) -> team_value
         strategies = ("auto", "adp", "rank", "points", "points@consensus", "points@mix")
         players = list(state.players.values())
@@ -75,36 +79,25 @@ class Simulator:
                     if r < acc:
                         break
                 out[team] = profile
-        if len(self.auto_mix) > 1:
-            autos = set(self.state.auto_teams) | {
-                t for t, p in enumerate(self.league.teams) if p.strategy == "auto" and t not in out}
-            for team in autos:
-                r, acc = rng.random(), 0.0
-                for p, strategy, noise in self.auto_mix:
-                    acc += p
-                    if r < acc:
-                        break
-                out[("auto", team)] = (strategy, noise)
         return out
 
     def profile(self, team: int, drawn: dict | None = None):
         """The model used for an opponent: auto while on autodraft, else saved
         strategy with learned noise (or this draft's draw for unsure teams)."""
         if team in self.state.auto_teams:
-            return self._auto(self.state.profile(team), (drawn or {}).get(("auto", team)))
+            return self._auto(self.state.profile(team))
         profile = (drawn or {}).get(team) or self.learned.get(team, self.state.profile(team))
         if profile.strategy == "unknown":  # no picks to learn from yet
             profile = replace(profile, strategy="adp")
         elif profile.strategy == "auto":
-            profile = self._auto(profile, (drawn or {}).get(("auto", team)))
+            profile = self._auto(profile)
         return profile
 
-    def _auto(self, profile, drawn=None):
-        """An autodraft team: this simulated draft's draw from the autodraft mix,
-        or (no draw) the most likely list."""
-        strategy, noise = drawn or self.auto_mix[0][1:]
-        return replace(profile, strategy=strategy, noise=noise, view="espn", favorites={},
-                       favorite_team="", team_boost=0.0)
+    def _auto(self, profile):
+        """An autodraft team: ESPN's list, with how often it takes the top
+        learned from this draft's autodraft picks."""
+        return replace(profile, strategy="auto", auto_top=self.auto_top, noise=0.0, view="espn",
+                       favorites={}, favorite_team="", team_boost=0.0)
 
     def _pool(self, strategy: str, taken: set[str], starts: dict[str, int]) -> tuple[list[Player], list[float]]:
         """First CANDIDATE_POOL untaken players (and their keys) for a strategy.

@@ -324,6 +324,8 @@ def cmd_new_league(args) -> None:
     elif not args.players:
         print(f"warning: {args.like} not found here, so players come from {cfg['players']} "
               "(not your sheet). Run this in your FantasyDraft folder, or pass --players <sheet link>.")
+    # ESPN mock-room autodraft takes the top of ESPN's list only about half the time.
+    cfg["autodraft_top"] = 0.5
     out.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {out}: {args.teams} teams, you pick #{args.my_pick}, others '{args.strategy}'")
 
@@ -812,7 +814,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--names", help="comma-separated team names in draft order")
     p.add_argument("--strategy", default="unknown", choices=["unknown", "auto", "adp", "rank", "points"],
                    help="saved strategy for the other teams (unknown = learn from their picks)")
-    p.add_argument("--noise", type=float, default=0.2)
+    p.add_argument("--noise", type=float, default=0.3)
     p.add_argument("--like", default="league.json",
                    help="copy players, sources and scoring from this league file if it exists (default league.json)")
     p.add_argument("--force", action="store_true")

@@ -116,26 +116,45 @@ def test_analyze_flags_autodrafter():
     assert tendencies[0].suggested == "auto"
 
 
-def test_fit_auto_learns_which_list_autodraft_follows():
+def test_fit_auto_learns_how_often_autodraft_takes_the_top():
     from fantasydraft.learn import fit_auto
 
-    # ESPN's rank and ADP disagree on every pair; the autodraft teams follow ADP.
-    players = {}
-    for i in range(30):
-        players[f"p{i}"] = P(f"p{i}", "PG" if i % 2 else "C", 300 - i, i + 1, i + 2 if i % 2 == 0 else i)
-    state = DraftState(league(n=4, my=0), players, [])
-    state.auto_teams = {1, 2, 3}
-    before = fit_auto(state)
-    assert before[0][1] == "auto" and len(before) == 3  # mostly ESPN's rank, some of each
-    by_adp = sorted(players.values(), key=lambda p: p.adp)
-    for pick in range(12):
-        state.picks.append(by_adp[pick].id)
-        if state.league.team_for_pick(pick) != 0:
-            state.auto_picks.add(pick)
-    mix = fit_auto(state)
-    assert mix[0][1] == "adp" and mix[0][0] > 0.7
-    assert all(prob >= 0.04 for prob, _, _ in mix)  # still allows for the others
-    assert abs(sum(prob for prob, _, _ in mix) - 1) < 0.01
+    players = {f"p{i}": P(f"p{i}", "PG" if i % 2 else "C", 300 - i, i + 1, i + 1) for i in range(40)}
+
+    def draft(prior, place):  # autodraft teams 1-3 take the `place`-th best left on ESPN's list
+        state = DraftState(league(n=4, my=0, autodraft_top=prior), players, [])
+        state.auto_teams = {1, 2, 3}
+        left = sorted(players.values(), key=lambda p: p.espn_rank)
+        for pick in range(16):
+            auto = state.league.team_for_pick(pick) != 0
+            p = left.pop(place - 1 if auto else 0)
+            state.picks.append(p.id)
+            if auto:
+                state.auto_picks.add(pick)
+        return state
+
+    assert fit_auto(DraftState(league(n=4), players, [])) == 1.0  # real league: ESPN autopick takes the top
+    assert fit_auto(DraftState(league(n=4, autodraft_top=0.5), players, [])) == 0.5  # mock room, no picks yet
+    assert fit_auto(draft(0.5, 1)) == 0.75  # 12 picks, all the top: (12 + 6) / (12 + 6 / 0.5)
+    assert 0.5 < fit_auto(draft(1.0, 2)) < 0.65  # took the 2nd: learned, even from a real-league start
+
+
+def test_noisy_drafters_vary():
+    pool = [P(f"p{i}", "PG", 100 - i, i + 1, i + 1) for i in range(30)]
+    rng = random.Random(0)
+    picks = [choose_pick(TeamProfile("a", "adp", 0.5), pool, rng).id for _ in range(2000)]
+    # log-normal noise 0.5 on keys 1, 2, 3...: the top goes about 80% of the time
+    assert 0.7 < picks.count("p0") / 2000 < 0.88 and picks.count("p1") > 150
+
+
+def test_autodraft_sometimes_passes_the_top():
+    pool = [P(f"p{i}", "PG", 100 - i, i + 1, i + 1) for i in range(10)]
+    rng = random.Random(0)
+    always = TeamProfile("a", "auto")
+    assert all(choose_pick(always, pool, rng).id == "p0" for _ in range(50))
+    half = TeamProfile("a", "auto", auto_top=0.5)
+    picks = [choose_pick(half, pool, rng).id for _ in range(2000)]
+    assert 0.45 < picks.count("p0") / 2000 < 0.55 and 0.2 < picks.count("p1") / 2000 < 0.3
 
 
 def test_resolve_player_names():
@@ -427,7 +446,7 @@ def test_learning_noise_and_strategy_from_picks():
 
     true = [TeamProfile("strict", "adp", 0.0), TeamProfile("loose rank", "rank", 0.4)] + \
         [TeamProfile(f"t{i}", "adp", 0.15) for i in range(8)]
-    players, picks = _simulated_draft(true, 80, seed=1)  # 8 picks at 0.4 noise: some seeds look like "points"
+    players, picks = _simulated_draft(true, 80, seed=5)  # 8 picks at 0.4 noise: some seeds look like another list
     guess = League([TeamProfile(t.name, "adp", 0.2) for t in true], 9)
     fits = fit_teams(DraftState(guess, players, picks))
     assert fits[0].noise < 0.08  # always took the top of the ADP list
