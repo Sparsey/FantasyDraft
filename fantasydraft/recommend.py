@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, field
+import zlib
+from dataclasses import dataclass, field, replace
 from statistics import mean
 
 from .lineup import team_value
@@ -14,7 +15,22 @@ def availability_sims(sims: int) -> int:
     return max(sims * 3, 200)
 
 
-MIN_AVAIL = 0.05  # below this chance of lasting to my pick, a player isn't shown as an option
+MIN_AVAIL = 0.05
+
+# How far a player's real season can land from your projection: the spread of
+# your sources, but at least this share of the projection.
+MIN_UNCERTAINTY = 0.08
+
+
+def uncertainty(p: Player) -> float:
+    return max(p.spread, MIN_UNCERTAINTY * max(p.proj_points, 0.0))
+
+
+def _drawn(p: Player, draw: int) -> Player:
+    """Player p with points drawn for simulated "truth" number `draw`: the same
+    player gets the same draw in every candidate's run of that simulated draft."""
+    z = random.Random(zlib.crc32(f"{draw}:{p.id}".encode())).gauss(0.0, 1.0)
+    return replace(p, proj_points=p.proj_points + z * uncertainty(p))  # below this chance of lasting to my pick, a player isn't shown as an option
 
 
 @dataclass
@@ -82,7 +98,14 @@ def recommend(
     sim = Simulator(state)
     out: list[Recommendation] = []
     for p in candidate_pool(state, candidates, exclude=gone):
-        values = [sim.run(random.Random(seed * 1_000_003 + i), my_next=p).my_value for i in range(sims)]
+        values = []
+        for i in range(sims):
+            roster_i = sim.run(random.Random(seed * 1_000_003 + i), my_next=p).my_roster
+            # Score the final roster on one possible "truth": each player's real
+            # points drawn around your projection (same draw for every candidate
+            # in this simulated draft), so "chance better" also covers your
+            # projections being wrong, not just who the other teams take.
+            values.append(team_value([_drawn(q, seed * 7919 + i) for q in roster_i], league))
         probs = avail.get(p.id, [])
         out.append(
             Recommendation(

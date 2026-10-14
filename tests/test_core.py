@@ -624,7 +624,7 @@ def test_dashboard_advice_explains_skipping_highest_projection():
     recs = recommend(st, candidates=4, sims=5)
     advice = Dashboard._advice(st, recs, availability(st, sims=20))
     assert advice["kind"] == "different"
-    assert advice["top"] == "Center A" and advice["best"] == "Guard A" and advice["gain"] >= 400
+    assert advice["top"] == "Center A" and advice["best"] == "Guard A" and advice["gain"] >= 200
     assert any("Guard B" in r and "Center B" in r for r in advice["reasons"]), advice["reasons"]
 
 
@@ -775,7 +775,8 @@ def test_versus_highest_projection_split():
     base, vs = versus_highest_projection(recs)
     assert base.name == "Guard A" and vs["Guard A"].diff == 0
     c = vs["Center A"]
-    assert c.diff >= 400 and c.p_better == 1.0 and c.p_worse == 0.0
+    # a clear edge, but not a certainty once projections can be wrong
+    assert c.diff >= 200 and c.p_better >= 0.75 and c.p_better > c.p_worse
 
 
 def test_safe_baseline_is_espns_top_projection():
