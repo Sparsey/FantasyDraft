@@ -378,6 +378,7 @@ function renderTeams() {
         ${t.me ? "" : `<select data-slot="${t.slot}" title="How the simulation models this team">${opts}</select>`}
         <span class="toggle${t.auto ? " on" : ""}" data-slot="${t.slot}" data-on="${t.auto ? 0 : 1}" title="Mark as on/off autodraft right now">${t.auto ? "AUTO" : "auto"}<span class="sw"></span></span>
       </div>
+      ${t.manager || (t.view && t.view !== "espn") || t.favorite_team ? `<div class="tsub">${t.manager ? esc(t.manager) : ""}${t.view && t.view !== "espn" ? ` · trusts <b>${t.view === "mix" ? "ESPN + outside" : "outside research"}</b>` : ""}${t.favorite_team ? ` · ${esc(t.favorite_team)} fan` : ""}</div>` : ""}
       <div class="tsub last">${t.count} picked${t.last ? " · last: " + esc(t.last) : ""}${t.full.length ? ` · <span title="At their position target: the simulation makes them less likely to take more">full: <b>${t.full.join(", ")}</b></span>` : ""}</div>
       ${t.strategy === "unknown" && !t.me && !t.auto ? `<div class="tsub">${o && o.used ? `modelled as <b>${o.used}</b> (best fit so far)` : "modelled as adp until their first pick"}</div>` : ""}${obs}
     </div>`;

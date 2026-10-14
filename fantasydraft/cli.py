@@ -349,7 +349,7 @@ def cmd_mock(args) -> None:
             choice = sim.my_greedy_pick(state.rosters()[slot], taken)
         else:
             prof = sim.profile(slot)
-            choice = choose_pick(prof, sim.top_untaken(prof.strategy, taken, CANDIDATE_POOL), rng, pick)
+            choice = choose_pick(prof, sim.top_untaken(prof.order_key, taken, CANDIDATE_POOL), rng, pick)
         state.picks.append(choice.id)
         save_picks(state.picks, state.players, args.picks)
         print(f"#{pick + 1:>3} {team.name:<20} {choice.name}")
@@ -390,6 +390,7 @@ def cmd_fetch_league(args) -> None:
     if args.dump:
         Path(args.dump).write_text(json.dumps(data, indent=1))
     names = client.team_names(data)
+    owners = client.team_owners(data)
     out = Path(args.out)
     existing = json.loads(out.read_text()) if out.exists() else {}
     old = {t["name"]: t for t in existing.get("teams", [])}
@@ -401,7 +402,9 @@ def cmd_fetch_league(args) -> None:
         "scoring": client.scoring(data) or existing.get("scoring"),
         "sources": existing.get("sources", {}),
         "espn_team_ids": client.pick_order(data),
-        "teams": [old.get(names[tid], {"name": names[tid], "strategy": "unknown", "noise": 0.2})
+        "managers": existing.get("managers", {}),
+        "teams": [{**old.get(names[tid], {"name": names[tid], "strategy": "unknown", "noise": 0.2}),
+                   **({"owner": owners[tid]} if tid in owners else {})}
                   for tid in client.pick_order(data)],
     }
     out.write_text(json.dumps(cfg, indent=2))

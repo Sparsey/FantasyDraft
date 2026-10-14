@@ -116,18 +116,58 @@ def save_players(players: list[Player], path: str | Path) -> None:
                         f"{p.proj_points:.1f}", num(p.espn_rank), num(p.adp)])
 
 
+_PROFILE_FIELDS = ("strategy", "noise", "spread", "favorites", "view", "favorite_team", "team_boost")
+
+
+def _profile(name: str, fields: dict, manager: str = "") -> TeamProfile:
+    return TeamProfile(
+        name=name,
+        strategy=fields.get("strategy", "unknown"),
+        noise=float(fields.get("noise", 0.15)),
+        spread=int(fields.get("spread", 8)),
+        favorites={k: float(v) for k, v in fields.get("favorites", {}).items()},
+        view=fields.get("view", "espn"),
+        favorite_team=str(fields.get("favorite_team", "")).upper(),
+        team_boost=float(fields.get("team_boost", 6.0 if fields.get("favorite_team") else 0.0)),
+        manager=manager,
+    )
+
+
+def _key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(text).lower())
+
+
+def match_manager(managers: dict, *names: str) -> str | None:
+    """The manager (person) whose name or "match" list fits any of a team's names
+    (team name, owner name, abbreviation)."""
+    keys = {_key(n) for n in names if n}
+    for person, fields in (managers or {}).items():
+        aliases = [person, *fields.get("match", [])]
+        if any(_key(a) in keys for a in aliases if a):
+            return person
+    return None
+
+
+def apply_manager(team: TeamProfile, managers: dict, person: str) -> TeamProfile:
+    """A team's profile filled in from a manager's profile."""
+    return _profile(team.name, managers[person], manager=person)
+
+
 def load_league(path: str | Path) -> League:
+    """League file -> League. Each team's profile comes from the team entry, or
+    (if the entry sets no strategy) from the matching person in "managers"."""
     cfg = json.loads(Path(path).read_text(encoding="utf-8"))
-    teams = [
-        TeamProfile(
-            name=t["name"],
-            strategy=t.get("strategy", "unknown"),
-            noise=float(t.get("noise", 0.15)),
-            spread=int(t.get("spread", 8)),
-            favorites={k: float(v) for k, v in t.get("favorites", {}).items()},
-        )
-        for t in cfg["teams"]
-    ]
+    managers = cfg.get("managers") or {}
+    teams = []
+    for t in cfg["teams"]:
+        person = match_manager(managers, t["name"], t.get("owner", ""), t.get("abbrev", ""))
+        explicit = t.get("strategy", "unknown") != "unknown"
+        if person and not explicit:
+            # The person's profile wins; the team entry only fills what it leaves out.
+            team_fields = {k: v for k, v in t.items() if k in _PROFILE_FIELDS and k != "strategy"}
+            teams.append(_profile(t["name"], {**team_fields, **managers[person]}, manager=person))
+        else:
+            teams.append(_profile(t["name"], t, manager=person or ""))
     my = cfg["my_team"]
     my_slot = next((i for i, t in enumerate(teams) if t.name == my), None) if isinstance(my, str) else my - 1
     if my_slot is None:
@@ -142,6 +182,10 @@ def load_league(path: str | Path) -> League:
         learn_noise=bool(cfg.get("learn_noise", True)),
         position_bias=float(cfg.get("position_bias", 0.35)),
     )
+
+
+def league_managers(path: str | Path) -> dict:
+    return json.loads(Path(path).read_text(encoding="utf-8")).get("managers") or {}
 
 
 def player_by_rank(rank: int, players: dict[str, Player]) -> str | None:

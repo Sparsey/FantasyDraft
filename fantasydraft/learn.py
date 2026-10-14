@@ -23,8 +23,16 @@ from .models import DraftState, TeamProfile
 
 NOISE_GRID = (0.02, 0.04, 0.07, 0.10, 0.14, 0.19, 0.25, 0.33, 0.45)
 STRATEGIES = ("adp", "rank", "points", "balanced", "feel")
+# With extra sources, also test whether a drafter follows the outside consensus.
+CONSENSUS_STRATEGIES = ("points@consensus", "balanced@consensus")
 # The list each strategy draws its candidates from.
-BASE_LIST = {"adp": "adp", "rank": "rank", "points": "points", "balanced": "points", "feel": "rank"}
+BASE_LIST = {"adp": "adp", "rank": "rank", "points": "points", "balanced": "points", "feel": "rank",
+             "points@consensus": "points@consensus", "balanced@consensus": "points@consensus"}
+
+
+def _strategies(state: DraftState) -> tuple[str, ...]:
+    has_consensus = any(abs(p.proj_points - p.room_points) > 1e-6 for p in state.players.values())
+    return STRATEGIES + CONSENSUS_STRATEGIES if has_consensus else STRATEGIES
 DRAWS = 150  # simulated choices per (pick, strategy, noise)
 PRIOR_SPREAD = 0.8  # sd of the prior on log(noise): fairly loose
 OUTSIDE = 1e-3  # likelihood of a pick from outside a strategy's top 30
@@ -67,7 +75,8 @@ def _pick_evidence(state: DraftState) -> dict[int, list[dict[str, tuple[float, .
     """Per team: for each own pick, likelihood-by-noise under each strategy."""
     league = state.league
     players = list(state.players.values())
-    orders = {b: order_for(b, players) for b in set(BASE_LIST.values())}
+    strategies = _strategies(state)
+    orders = {b: order_for(b, players) for b in {BASE_LIST[s] for s in strategies}}
     taken: set[str] = set()
     evidence: dict[int, list[dict[str, tuple[float, ...]]]] = {t: [] for t in range(league.num_teams)}
     bias, targets = league.position_bias, league.targets
@@ -87,7 +96,7 @@ def _pick_evidence(state: DraftState) -> dict[int, list[dict[str, tuple[float, .
                             break
                 pools[b] = pool
             row = {}
-            for s in STRATEGIES:
+            for s in strategies:
                 pool = pools[BASE_LIST[s]]
                 if s == "feel":
                     # Even-ish choice among ESPN's top `spread`; noise plays no part.
@@ -97,15 +106,15 @@ def _pick_evidence(state: DraftState) -> dict[int, list[dict[str, tuple[float, .
                     lik = w[ids.index(pid)] / sum(w) if pid in ids else OUTSIDE
                     row[s] = tuple(lik for _ in NOISE_GRID)
                     continue
-                if s == "balanced":
-                    pool = balanced_order(pool, counts[team], targets)
+                if s.startswith("balanced"):
+                    pool = balanced_order(pool, counts[team], targets, s.partition("@")[2] or "espn")
                 ids = [p.id for p in pool]
                 chosen = ids.index(pid) if pid in ids else len(ids)
-                if s in ("points", "balanced"):
+                if s.split("@")[0] in ("points", "balanced"):
                     raw = [pick + i + 1.0 for i in range(len(pool))]
                 else:
                     raw = [max(base_key(s, p), 0.1) for p in pool]
-                if s == "balanced":  # needs are already in the order
+                if s.startswith("balanced"):  # needs are already in the order
                     keys = tuple(raw)
                 else:
                     keys = tuple(k * (1.0 + bias) if full and p.positions <= full else k
@@ -132,7 +141,7 @@ def fit_teams(state: DraftState) -> dict[int, TeamFit]:
             continue
         posts: dict[str, list[float]] = {}
         evidence: dict[str, float] = {}
-        for s in STRATEGIES:
+        for s in rows[0]:
             logw = [lp + sum(math.log(r[s][g]) for r in rows) for g, lp in enumerate(log_prior)]
             top = max(logw)
             w = [math.exp(x - top) for x in logw]
@@ -141,7 +150,10 @@ def fit_teams(state: DraftState) -> dict[int, TeamFit]:
         top = max(evidence.values())
         z = sum(math.exp(e - top) for e in evidence.values())
         fit = {s: math.exp(e - top) / z for s, e in evidence.items()}
-        saved = profile.strategy if profile.strategy in STRATEGIES else max(fit, key=fit.get)
+        key = profile.strategy
+        if key in ("points", "balanced") and profile.view != "espn":
+            key = f"{key}@{profile.view}"
+        saved = key if key in fit else max(fit, key=fit.get)
         # Posterior mean in log space (noise is a scale parameter).
         noise = math.exp(sum(w * math.log(n) for w, n in zip(posts[saved], NOISE_GRID)))
         out[team] = TeamFit(len(rows), saved, round(noise, 3), prior_noise, fit)
@@ -157,5 +169,6 @@ def learned_profiles(state: DraftState) -> dict[int, TeamProfile]:
         profile = state.league.teams[team]
         if profile.strategy != "auto":
             noise = f.noise if state.league.learn_noise else profile.noise
-            out[team] = replace(profile, strategy=f.strategy, noise=noise)
+            strategy, _, view = f.strategy.partition("@")
+            out[team] = replace(profile, strategy=strategy, view=view or profile.view, noise=noise)
     return out

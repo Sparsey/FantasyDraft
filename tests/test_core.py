@@ -621,3 +621,51 @@ def test_dashboard_advice_explains_skipping_highest_projection():
     assert advice["kind"] == "different"
     assert advice["top"] == "Center A" and advice["best"] == "Guard A" and advice["gain"] >= 400
     assert any("Guard B" in r and "Center B" in r for r in advice["reasons"]), advice["reasons"]
+
+
+def test_managers_attach_to_teams_by_name(tmp_path):
+    import json as _json
+    from fantasydraft.io import load_league
+
+    cfg = {
+        "my_team": 1,
+        "managers": {
+            "Ryan": {"match": ["Running Rhinos", "RRT"], "strategy": "balanced", "noise": 0.08, "view": "consensus"},
+            "Logan": {"match": ["Waiver Warrior"], "strategy": "feel", "spread": 8, "favorite_team": "lal"},
+        },
+        "teams": [{"name": "Me"}, {"name": "Running Rhinos", "noise": 0.2},
+                  {"name": "Team 3", "owner": "Logan"}, {"name": "Team 4", "strategy": "rank"}],
+    }
+    f = tmp_path / "l.json"
+    f.write_text(_json.dumps(cfg))
+    lg = load_league(f)
+    assert (lg.teams[1].strategy, lg.teams[1].noise, lg.teams[1].view, lg.teams[1].manager) == ("balanced", 0.08, "consensus", "Ryan")
+    assert (lg.teams[2].strategy, lg.teams[2].favorite_team, lg.teams[2].team_boost) == ("feel", "LAL", 6.0)
+    assert lg.teams[3].strategy == "rank" and lg.teams[3].manager == ""
+
+
+def test_consensus_view_drafter_is_recognised():
+    import dataclasses
+    from fantasydraft.learn import fit_teams
+
+    base = load_players(SAMPLE)
+    rng = random.Random(5)
+    # My consensus differs from ESPN by up to +-15%.
+    players = {pid: dataclasses.replace(p, espn_points=p.proj_points,
+                                        proj_points=p.proj_points * rng.uniform(0.85, 1.15))
+               for pid, p in base.items()}
+    true = [TeamProfile("homework", "points", 0.04, view="consensus")] + \
+        [TeamProfile(f"t{i}", "adp", 0.15) for i in range(9)]
+    lg = League(true, 9)
+    st = DraftState(lg, players)
+    sim = Simulator(st)
+    rng2 = random.Random(1)
+    taken: set[str] = set()
+    for pick in range(100):
+        prof = true[lg.team_for_pick(pick)]
+        c = choose_pick(prof, sim.top_untaken(prof.order_key, taken, 30), rng2, pick)
+        st.picks.append(c.id)
+        taken.add(c.id)
+    guess = League([TeamProfile(t.name, "unknown", 0.2) for t in true], 9)
+    fit = fit_teams(DraftState(guess, players, st.picks))[0]
+    assert max(fit.fit, key=fit.fit.get) in ("points@consensus", "balanced@consensus")

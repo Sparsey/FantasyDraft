@@ -24,7 +24,7 @@ from pathlib import Path
 
 from .analyze import analyze
 from .drafters import add_to_counts, full_positions
-from .io import apply_log, is_placeholder, load_state
+from .io import apply_log, apply_manager, is_placeholder, league_managers, load_state, match_manager
 from .learn import fit_teams
 from .lineup import assign_lineup, over_targets, target_fill
 from .models import DraftState, Player, TeamProfile
@@ -58,6 +58,7 @@ class Dashboard:
         self.league = state.league
         self.players = state.players
         self.league_path = Path(league_path)
+        self.managers = league_managers(league_path)
         self._tendencies: tuple[int, list] = (-1, [])
         self.tracker = RoomTracker(self.league, self.players, picks_path, log=self._log)
         self.raw_log = Path(raw_log) if raw_log else None
@@ -274,6 +275,7 @@ class Dashboard:
                 "bench_slots": lg.roster_slots.get("BE", 0),
                 "teams": [{
                     "slot": i, "name": tr.name(i), "strategy": t.strategy, "noise": t.noise,
+                    "manager": t.manager, "view": t.view, "favorite_team": t.favorite_team,
                     "auto": i in st.auto_teams, "me": i == lg.my_slot, "count": len(rosters[i]),
                     "last": rosters[i][-1].name if rosters[i] else None,
                     "observed": tendencies[i],
@@ -417,9 +419,25 @@ class Dashboard:
                 elif kind == "hello":
                     self.page_connected = time.time()
                     print(f"Draft page connected: {e.get('url', '')}", flush=True)
+            self._match_managers()
             changed = self.tracker.version != before
         if changed:
             self._changed()
+
+    def _match_managers(self) -> None:
+        """Attach people's profiles to teams by the team names on the draft page."""
+        if not self.managers:
+            return
+        lg = self.league
+        for slot, name in self.tracker.slot_names.items():
+            team = lg.teams[slot]
+            if slot == lg.my_slot or team.manager or team.strategy != "unknown":
+                continue
+            person = match_manager(self.managers, name, team.name)
+            if person:
+                lg.teams[slot] = apply_manager(team, self.managers, person)
+                self.tracker.version += 1
+                self.tracker.log(f"   {name}: using {person}'s profile ({lg.teams[slot].strategy})")
 
 
 def _app_browser() -> str | None:

@@ -17,8 +17,18 @@ def _finite(x: float, fallback: float) -> float:
     return x if math.isfinite(x) else fallback
 
 
+def view_points(p: Player, view: str = "espn") -> float:
+    """A player's projection as seen by a drafter with this view."""
+    if view == "consensus":
+        return p.proj_points
+    if view == "mix":
+        return (p.proj_points + p.room_points) / 2
+    return p.room_points
+
+
 def base_key(strategy: str, p: Player) -> float:
-    """Sort key for a strategy; lower is better."""
+    """Sort key for a strategy (or order key like "points@consensus"); lower is better."""
+    strategy, _, view = strategy.partition("@")
     if strategy == "unknown":
         strategy = "adp"  # the default guess for a team we know nothing about
     if strategy in ("auto", "rank", "feel"):
@@ -26,7 +36,7 @@ def base_key(strategy: str, p: Player) -> float:
     if strategy == "adp":
         return _finite(p.adp, _finite(p.espn_rank, 10_000.0))
     if strategy in ("points", "balanced"):
-        return -p.room_points  # opponents see ESPN's projections, not mine
+        return -view_points(p, view or "espn")  # by default: ESPN's numbers, as in the room
     raise ValueError(strategy)
 
 
@@ -46,8 +56,9 @@ def need_multiplier(p: Player, counts: dict[str, float], targets: dict[str, int]
     return 0.6
 
 
-def balanced_order(pool: Sequence[Player], counts: dict[str, float], targets: dict[str, int]) -> list[Player]:
-    return sorted(pool, key=lambda p: -p.room_points * need_multiplier(p, counts, targets))
+def balanced_order(pool: Sequence[Player], counts: dict[str, float], targets: dict[str, int],
+                   view: str = "espn") -> list[Player]:
+    return sorted(pool, key=lambda p: -view_points(p, view) * need_multiplier(p, counts, targets))
 
 
 def order_for(strategy: str, players: Iterable[Player]) -> list[Player]:
@@ -96,11 +107,13 @@ def choose_pick(
         weights = feel_weights(len(top))
         if profile.favorites:
             weights = [w * (3.0 if p.name in profile.favorites else 1.0) for w, p in zip(weights, top)]
+        if profile.team_boost and profile.favorite_team:
+            weights = [w * (2.0 if p.nba_team == profile.favorite_team else 1.0) for w, p in zip(weights, top)]
         return rng.choices(top, weights)[0]
 
     pool = list(ordered[:CANDIDATE_POOL])
     if strategy == "balanced":
-        pool = balanced_order(pool, counts or {}, targets or {})
+        pool = balanced_order(pool, counts or {}, targets or {}, profile.view)
         bias = 0.0  # position needs are already built into the order
     best, best_key = pool[0], float("inf")
     for i, p in enumerate(pool):
@@ -112,6 +125,8 @@ def choose_pick(
             key = keys[i] if keys is not None else base_key(strategy, p)
         if profile.favorites:
             key -= profile.favorites.get(p.name, 0.0)
+        if profile.team_boost and p.nba_team == profile.favorite_team:
+            key -= profile.team_boost  # a fan of this team reaches for its players
         key = max(key, 0.1)
         if bias and full and p.positions <= full:
             key *= 1.0 + bias

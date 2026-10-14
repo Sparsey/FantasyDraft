@@ -84,6 +84,20 @@ class EspnClient:
         return names
 
     @staticmethod
+    def team_owners(league: dict) -> dict[int, str]:
+        """Team id -> owner's name ("First Last", else display name)."""
+        members = {}
+        for m in league.get("members", []):
+            full = f"{m.get('firstName', '')} {m.get('lastName', '')}".strip()
+            members[m.get("id")] = full or m.get("displayName", "")
+        out = {}
+        for t in league.get("teams", []):
+            owners = [members.get(o, "") for o in t.get("owners", []) if members.get(o)]
+            if owners:
+                out[t["id"]] = " & ".join(owners)
+        return out
+
+    @staticmethod
     def pick_order(league: dict) -> list[int]:
         return list(league["settings"]["draftSettings"]["pickOrder"])
 

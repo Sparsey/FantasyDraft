@@ -35,7 +35,7 @@ class Simulator:
             self.learned = learned_profiles(state)
         self.league = state.league
         self.slots = self.league.starting_slots
-        strategies = ("auto", "adp", "rank", "points")
+        strategies = ("auto", "adp", "rank", "points", "points@consensus", "points@mix")
         players = list(state.players.values())
         self.orders = {s: order_for(s, players) for s in strategies}
         self.keys = {s: [base_key(s, p) for p in order] for s, order in self.orders.items()}
@@ -142,7 +142,7 @@ class Simulator:
                 order[pick] = choice.id
             else:
                 profile = self.profile(team)
-                pool, keys = self._pool(profile.strategy, taken, starts)
+                pool, keys = self._pool(profile.order_key, taken, starts)
                 full = full_positions(counts[team], targets) if bias else frozenset()
                 choice = choose_pick(profile, pool, rng, pick, keys, full, bias, counts[team], targets)
                 taken_at[choice.id] = pick

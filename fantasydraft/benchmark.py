@@ -78,7 +78,7 @@ def run_draft(players: dict[str, Player], base: League, policy: str, slot: int, 
     true = _true_league(slot, seed, base)
     belief = _belief_league(true)
     plist = list(players.values())
-    orders = {s: order_for(s, plist) for s in ("adp", "rank", "points")}
+    orders = {s: order_for(s, plist) for s in ("adp", "rank", "points", "points@consensus", "points@mix")}
     orders.update(auto=orders["rank"], feel=orders["rank"], balanced=orders["points"])
     rng = random.Random(seed * 7919 + 17)
     picks: list[str] = []
@@ -103,7 +103,7 @@ def run_draft(players: dict[str, Player], base: League, policy: str, slot: int, 
                     choice = recs[0].player
         else:
             prof = true.teams[team]
-            pool = [p for p in orders[prof.strategy] if p.id not in taken][:CANDIDATE_POOL]
+            pool = [p for p in orders[prof.order_key] if p.id not in taken][:CANDIDATE_POOL]
             full = full_positions(counts[team], targets) if true.position_bias else frozenset()
             choice = choose_pick(prof, pool, rng, pick, None, full, true.position_bias, counts[team], targets)
         picks.append(choice.id)

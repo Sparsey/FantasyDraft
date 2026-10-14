@@ -71,6 +71,7 @@ class TeamProfile:
       - "feel":   picks by feel among ESPN's top suggestions: chooses from
                   the top `spread` players by ESPN rank, fairly evenly
                   (#1 only mildly favoured), never outside them.
+      view decides whose projections "points"/"balanced" drafters use (see below).
       - "unknown": not set; the simulation uses whichever strategy best fits
                   the team's picks so far (adp before their first).
     noise: relative standard deviation applied to the sort key (0.15 = ±15%).
@@ -84,8 +85,15 @@ class TeamProfile:
     noise: float = 0.15
     favorites: dict[str, float] = field(default_factory=dict)
     spread: int = 8
+    # Whose projections a "points"/"balanced" drafter believes: ESPN's (what
+    # the draft room shows), the outside consensus (does homework), or a mix.
+    view: str = "espn"
+    favorite_team: str = ""  # NBA team abbreviation they're a fan of, e.g. "BOS"
+    team_boost: float = 0.0  # draft spots earlier they take that team's players
+    manager: str = ""  # the person (from the league file's "managers")
 
     VALID_STRATEGIES = ("unknown", "auto", "adp", "rank", "points", "balanced", "feel")
+    VALID_VIEWS = ("espn", "consensus", "mix")
 
     def __post_init__(self) -> None:
         if self.strategy not in self.VALID_STRATEGIES:
@@ -93,6 +101,15 @@ class TeamProfile:
                 f"team {self.name!r}: unknown strategy {self.strategy!r}, "
                 f"expected one of {self.VALID_STRATEGIES}"
             )
+        if self.view not in self.VALID_VIEWS:
+            raise ValueError(f"team {self.name!r}: view must be one of {self.VALID_VIEWS}")
+
+    @property
+    def order_key(self) -> str:
+        """Which ordered list this drafter picks from ("points@consensus", "rank", ...)."""
+        if self.strategy in ("points", "balanced") and self.view != "espn":
+            return f"points@{self.view}"
+        return self.strategy
 
 
 @dataclass
