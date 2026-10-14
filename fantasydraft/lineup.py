@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Iterable, Sequence
 
-from .models import SLOT_ELIGIBILITY, League, Player
+from .models import POSITIONS, SLOT_ELIGIBILITY, League, Player
 
 
 def assign_lineup(
@@ -66,11 +66,27 @@ def over_targets(roster: Iterable[Player], league: League) -> list[Player]:
 
 def team_value(roster: list[Player], league: League) -> float:
     """Projected value of a roster: best lineup + discounted bench, minus a
-    discount on players beyond the position targets (roster balance)."""
+    discount on players beyond the position targets (roster balance), minus
+    the games a position's only player misses with nobody to cover (injury cover)."""
     value = roster_value(roster, league.starting_slots, league.bench_weight)
     if league.balance_penalty:
         value -= league.balance_penalty * sum(p.proj_points for p in over_targets(roster, league))
+    if league.cover_rate:
+        value -= league.cover_rate * sum(p.proj_points for p in uncovered(roster, league))
     return value
+
+
+def uncovered(roster: list[Player], league: League) -> list[Player]:
+    """Players who are the only one on the roster able to play a position that
+    has its own starting slot: when they sit, that slot sits empty."""
+    slots = set(league.starting_slots)
+    out = []
+    for pos in POSITIONS:
+        if pos in slots:
+            able = [p for p in roster if pos in p.positions]
+            if len(able) == 1 and able[0] not in out:
+                out.append(able[0])
+    return out
 
 
 def target_fill(roster: Iterable[Player], league: League) -> tuple[dict[str, int], list[Player]]:

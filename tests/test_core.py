@@ -369,7 +369,7 @@ def test_recommend_skips_players_who_never_last():
 def test_balance_targets_discount_extra_centers():
     from fantasydraft.lineup import over_targets, team_value
 
-    lg = League([TeamProfile("a"), TeamProfile("b")], 0)  # default slots: 13 players, targets 3 each
+    lg = League([TeamProfile("a"), TeamProfile("b")], 0, cover_rate=0)  # default slots: 13 players, targets 3 each
     roster = [P("c1", "C", 2000), P("c2", "C", 1900), P("pfc", "PF/C", 1800)]
     c4, g = P("c4", "C", 1700), P("g", "PG", 1650)
     assert over_targets(roster + [c4], lg) == []  # PF/C counts as the PF
@@ -381,7 +381,7 @@ def test_balance_targets_discount_extra_centers():
     assert gain_g == pytest.approx(1650)
     assert gain_g > gain_c
 
-    no_balance = League([TeamProfile("a"), TeamProfile("b")], 0, balance_penalty=0.0)
+    no_balance = League([TeamProfile("a"), TeamProfile("b")], 0, balance_penalty=0.0, cover_rate=0)
     assert team_value(roster + [c4], no_balance) - team_value(roster, no_balance) == pytest.approx(1700)
 
 
@@ -617,7 +617,7 @@ def test_dashboard_advice_explains_skipping_highest_projection():
           Q("Guard B", "PG", 2500, 7), Q("Center B", "C", 1000, 8)] + [Q(f"f{i}", "SF", 300 - i, 9 + i) for i in range(12)]
     players = {p.id: p for p in pl}
     teams = [TeamProfile("Opp1", "auto"), TeamProfile("Me", "adp"), TeamProfile("Opp2", "auto"), TeamProfile("Opp3", "auto")]
-    lg = League(teams, 1, roster_slots={"PG": 1, "C": 1, "BE": 2}, balance_penalty=0)
+    lg = League(teams, 1, roster_slots={"PG": 1, "C": 1, "BE": 2}, balance_penalty=0, cover_rate=0)
     st = DraftState(lg, players, ["Filler 0"])
     from fantasydraft.simulate import availability
 
@@ -770,7 +770,7 @@ def test_versus_highest_projection_split():
           Q("Guard B", "PG", 2500, 7), Q("Center B", "C", 1000, 8)] + [Q(f"f{i}", "SF", 300 - i, 9 + i) for i in range(12)]
     players = {p.id: p for p in pl}
     teams = [TeamProfile("Opp1", "auto"), TeamProfile("Me", "adp"), TeamProfile("Opp2", "auto"), TeamProfile("Opp3", "auto")]
-    lg = League(teams, 1, roster_slots={"PG": 1, "C": 1, "BE": 2}, balance_penalty=0)
+    lg = League(teams, 1, roster_slots={"PG": 1, "C": 1, "BE": 2}, balance_penalty=0, cover_rate=0)
     recs = recommend(DraftState(lg, players, ["Filler 0"]), candidates=4, sims=8)
     base, vs = versus_highest_projection(recs)
     assert base.name == "Guard A" and vs["Guard A"].diff == 0
@@ -1132,3 +1132,15 @@ def test_review_compares_with_espn_autodraft(tmp_path):
     text = review(st, dec)
     assert "#  8 took" in text and "ESPN's pick" in text and "GAMBLE was" in text
     assert "by your combined projections" in text and "by ESPN's projections" in text
+
+
+def test_injury_cover_values_a_backup_at_a_position():
+    from fantasydraft.lineup import team_value, uncovered
+
+    lg = League([TeamProfile("a"), TeamProfile("b")], 0, balance_penalty=0)
+    roster = [P("c1", "C", 2000), P("g1", "PG", 1900), P("g2", "PG/SG", 1800), P("f1", "SF/PF", 1700),
+              P("f2", "PF/SF", 1600), P("s1", "SG", 1500)]
+    assert [p.name for p in uncovered(roster, lg)] == ["c1"]  # the only center
+    with_backup = team_value(roster + [P("c2", "C", 1000)], lg) - team_value(roster, lg)
+    with_guard = team_value(roster + [P("g3", "PG", 1000)], lg) - team_value(roster, lg)
+    assert with_backup - with_guard == pytest.approx(0.12 * 2000)  # covers the C slot when c1 sits

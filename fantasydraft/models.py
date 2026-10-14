@@ -131,6 +131,9 @@ class League:
     # Teams that start the draft on autodraft (saved strategy "auto" in the
     # league file). It's the same flag as the live autodraft switch.
     start_auto: frozenset[int] = frozenset()
+    # Share of games a player misses: a position with only one player who can
+    # play it loses that much of his value (nobody covers the slot).
+    cover_rate: float = 0.12
 
     def __post_init__(self) -> None:
         for slot in self.roster_slots:

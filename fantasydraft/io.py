@@ -233,6 +233,7 @@ def load_league(path: str | Path) -> League:
         learn_noise=bool(cfg.get("learn_noise", True)),
         position_bias=float(cfg.get("position_bias", 0.35)),
         start_auto=start_auto,
+        cover_rate=float(cfg.get("cover_rate", 0.12)),
     )
 
 
