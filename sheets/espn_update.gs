@@ -197,6 +197,12 @@ function updatePlayers_() {
     return;
   }
   var fetched = fetchEspnPlayers_(s);
+  // Which ESPN rank lists exist, and how the chosen one compares with
+  // projection order (identical order suggests it's just sorted by projections).
+  var rankTypes = {};
+  fetched.players.forEach(function (raw) {
+    Object.keys((raw.player || raw).draftRanksByRankType || {}).forEach(function (k) { rankTypes[k] = true; });
+  });
   var players = fetched.players
     .map(function (raw) { return parsePlayer_(raw, s.season, s.rankType); })
     .filter(function (p) { return p; });
@@ -253,10 +259,19 @@ function updatePlayers_() {
     });
   }
   var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+  var byProj = players.filter(function (p) { return p.proj_points !== '' && p.espn_rank !== ''; })
+    .sort(function (a, b) { return b.proj_points - a.proj_points; }).slice(0, 150);
+  var byRank = byProj.slice().sort(function (a, b) { return a.espn_rank - b.espn_rank; });
+  var moved = 0;
+  byProj.forEach(function (p, i) { if (Math.abs(byRank.indexOf(p) - i) >= 5) moved++; });
+  var rankNote = 'Rank lists ESPN provides: ' + (Object.keys(rankTypes).join(', ') || 'none') +
+                 '\nUsing ' + s.rankType + ': ' + (byProj.length ?
+                   moved + ' of the top ' + byProj.length + ' by projection are 5+ spots away from their ' + s.rankType + ' rank' +
+                   (moved === 0 ? ' (same order as projections)' : '') : 'no ranks found');
   sheet.getRange(1, col.id + 1).setNote('Last ESPN update: ' + stamp + '\nProjections: ' + fetched.source +
-                                        '\nRanks: ' + s.rankType + ', season ' + s.season +
+                                        '\n' + rankNote + '\nSeason ' + s.season +
                                         (fetched.warning ? '\n\n' + fetched.warning : ''));
-  var summary = updated + ' players updated, ' + added + ' added (projections: ' + fetched.source + ').';
+  var summary = updated + ' players updated, ' + added + ' added (projections: ' + fetched.source + ').\n' + rankNote;
   if (fetched.warning) {
     SpreadsheetApp.getUi().alert(summary + '\n\n' + fetched.warning);
   } else {
