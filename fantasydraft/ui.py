@@ -129,6 +129,7 @@ class Dashboard:
                     if not self._publish(version, self._quick(st, probs), "chances"):
                         continue
                 self._predict(st)
+                self._refresh_tendencies(st, version)  # cheap; don't wait for the slow stage
                 if self.tracker.version != version:
                     continue
                 result = self._compute(st, probs)
@@ -140,12 +141,14 @@ class Dashboard:
             with self.lock:
                 self.computing = False
                 self.done_version = version
-            try:
-                rows = self._compute_tendencies(st)
-                with self.lock:
-                    self._tendencies = (version, rows)
-            except Exception:
-                traceback.print_exc()
+
+    def _refresh_tendencies(self, st: DraftState, version: int) -> None:
+        try:
+            rows = self._compute_tendencies(st)
+            with self.lock:
+                self._tendencies = (version, rows)
+        except Exception:
+            traceback.print_exc()
 
     def _predict(self, st: DraftState) -> None:
         """Likely players at each upcoming pick (for the pick strip), and a

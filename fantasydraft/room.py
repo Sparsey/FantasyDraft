@@ -368,7 +368,8 @@ class RoomTracker:
         self._replay(pending[last + 1:])
 
     def _recover(self, text: str, done: int) -> list[str] | None:
-        """Picks 1..done from the page's pick list, or None if it isn't all there."""
+        """Picks 1..done from the picks we have plus the page's pick list, or None
+        if together they don't cover them all (or disagree)."""
         index: dict[str, str] = {}
         for pid, p in self.players.items():
             index.setdefault(_norm(p.name), pid)
@@ -380,6 +381,13 @@ class RoomTracker:
             if pid is None:  # not in your players list: keep what we had, else a placeholder
                 pid = known[k - 1] if k - 1 < len(known) else self._unlisted(name)
             by_pick[k] = pid
-        if not all(k in by_pick for k in range(1, done + 1)):
+        # ESPN's pick list may show only recent picks: combine it with the picks
+        # we already have, as long as the two agree wherever they overlap.
+        if any(k <= len(known) and by_pick[k] != known[k - 1] for k in by_pick if not
+               self.players[by_pick[k]].name.startswith("Unknown player")):
             return None
-        return [by_pick[k] for k in range(1, done + 1)]
+        merged = {k: known[k - 1] for k in range(1, len(known) + 1)}
+        merged.update({k: v for k, v in by_pick.items() if k > len(known)})
+        if not all(k in merged for k in range(1, done + 1)):
+            return None
+        return [merged[k] for k in range(1, done + 1)]

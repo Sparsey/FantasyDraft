@@ -488,6 +488,16 @@ def cmd_live(args) -> None:
         time.sleep(args.interval)
 
 
+def cmd_replay(args) -> None:
+    from .capture import replay_report
+
+    state = load_state(args.players, args.league, None)
+    text = replay_report(args.log, state.league, state.players)
+    Path(args.out).write_text(text, encoding="utf-8")
+    print(text[-2500:])
+    print(f"\n(full report in {args.out}; it has no cookies or tokens and is fine to share)")
+
+
 def cmd_capture(args) -> None:
     from .capture import serve, summarize
 
@@ -793,6 +803,13 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--candidates", type=int, default=8)
     p.add_argument("--policies", nargs="+", default=["auto", "points", "greedy", "model"])
     p.set_defaults(func=cmd_benchmark)
+
+    p = sub.add_parser("replay", help="replay a dashboard feed log and write a shareable report of what happened")
+    p.add_argument("log", nargs="?", default="draft_feed.jsonl", help="the dashboard's feed log (ui --out)")
+    p.add_argument("--league", default="league.json")
+    p.add_argument("--players", help=players_help)
+    p.add_argument("--out", default="replay_report.txt")
+    p.set_defaults(func=cmd_replay)
 
     p = sub.add_parser("capture", help="record ESPN draft-room traffic sent by the browser userscript")
     p.add_argument("--out", default="capture.jsonl")

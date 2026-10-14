@@ -187,3 +187,58 @@ def summarize(path: str | Path, samples: int = 3) -> str:
         out.append("\n== last page text (start) ==")
         out.append(redact(dom[-1].get("data", ""))[:3000])
     return "\n".join(out)
+
+
+def replay_report(path: str | Path, league, players: dict, max_snapshots: int = 12) -> str:
+    """Replay a dashboard/capture log through the live tracker and report, safely
+    (redacted), where it lost track, why, and what the page text looked like then."""
+    import tempfile
+
+    from .io import _norm
+    from .room import ON_CLOCK, PICK_LINE, RoomTracker
+
+    events = [json.loads(line) for line in Path(path).read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    names = {_norm(p.name) for p in players.values()}
+    out = [f"{len(events)} events: {dict(Counter(e.get('kind', '?') for e in events))}",
+           f"league file: {league.num_teams} teams, {league.rounds} rounds, you pick #{league.my_slot + 1}", ""]
+    lines: list[str] = []
+    t0 = next((e["t"] for e in events if isinstance(e.get("t"), (int, float))), 0)
+    now = [0.0]
+    with tempfile.TemporaryDirectory() as tmp:
+        tr = RoomTracker(league, dict(players), Path(tmp) / "picks.txt",
+                         log=lambda line: lines.append(f"+{now[0]:6.0f}s {line}"))
+        shots = 0
+        was_blocked = None
+        for e in events:
+            now[0] = (e.get("t", t0) - t0) / 1000 if isinstance(e.get("t"), (int, float)) else now[0]
+            kind = e.get("kind")
+            if kind == "hello":
+                lines.append(f"+{now[0]:6.0f}s --- draft page (re)loaded ---")
+            elif kind in ("ws-open", "ws-close"):
+                lines.append(f"+{now[0]:6.0f}s --- feed connection {kind[3:]} ---")
+            elif kind == "ws-in":
+                tr.handle_message(str(e.get("data", "")))
+            elif kind == "dom-text":
+                text = str(e.get("data", ""))
+                m = ON_CLOCK.search(text)
+                found = PICK_LINE.findall(text)
+                unknown = sorted({n.strip() for n, *_ in found if _norm(n) not in names})
+                interesting = tr.blocked or (m and int(m.group(1)) - 1 != len(tr.picks))
+                if interesting and shots < max_snapshots:
+                    shots += 1
+                    lines.append(f"+{now[0]:6.0f}s page: on the clock {m.group(1) if m else '?'}, "
+                                 f"{len(tr.picks)} picks known, {len(found)} pick-list lines read"
+                                 + (f", not in your list: {unknown[:8]}" if unknown else ""))
+                    at = text.find("R1,") if "R1," in text else (m.start() if m else 0)
+                    excerpt = redact(text[max(0, at - 300): at + 700]).replace("\n", " | ")
+                    lines.append(f"         page text: {excerpt}")
+                tr.handle_page_text(text)
+            if tr.blocked != was_blocked:
+                lines.append(f"+{now[0]:6.0f}s {'BLOCKED: ' + tr.blocked if tr.blocked else 'unblocked'}"
+                             f" (picks known {len(tr.picks)}, held {len(tr.buffer)})")
+                was_blocked = tr.blocked
+        out += lines
+        out += ["", f"end: {len(tr.picks)} picks recorded, blocked: {tr.blocked}, "
+                    f"team count seen: {tr.team_count or 'as in league file'}, "
+                    f"your position per ESPN: {tr.my_draft_position()}"]
+    return "\n".join(out)

@@ -1005,3 +1005,31 @@ def test_wrong_team_count_is_detected_and_restart_recovers(tmp_path):
     tr2.handle_message(f"SELECTING {t} 60000")
     tr2.handle_message(f"SELECTED {t} {ids[12]} 1 m")
     assert tr2.picks == ids[:13] and not tr2.blocked
+
+
+def test_resync_from_a_partial_pick_list(tmp_path):
+    from fantasydraft.room import RoomTracker
+
+    players = load_players(SAMPLE)
+    ids = sorted(players, key=lambda p: players[p].espn_rank)
+    league = League([TeamProfile(f"Team {i + 1}") for i in range(8)], 2)
+    espn = [21, 22, 23, 24, 25, 26, 27, 28]
+    tr = RoomTracker(league, players, tmp_path / "p.txt", log=lambda _: None)
+    for k in list(range(10)) + [13, 14]:  # picks 11-13 missed in a reload
+        t = espn[league.team_for_pick(k)]
+        tr.handle_message(f"SELECTING {t} 60000")
+        tr.handle_message(f"SELECTED {t} {ids[k]} 1 m")
+    assert tr.blocked and len(tr.picks) == 10
+    # ESPN's pick list only shows the latest picks (7-15 here)
+    lines = [f"{players[ids[k]].name} / BOS PG\nR{k // 8 + 1}, P{k % 8 + 1} - X" for k in range(6, 15)]
+    tr.handle_page_text("\n".join(lines) + "\nON THE CLOCK: PICK 16")
+    assert not tr.blocked and tr.picks == ids[:15]
+    # but a page that disagrees with what we have is not trusted
+    tr2 = RoomTracker(league, players, tmp_path / "q.txt", log=lambda _: None)
+    for k in range(10):
+        t = espn[league.team_for_pick(k)]
+        tr2.handle_message(f"SELECTING {t} 60000")
+        tr2.handle_message(f"SELECTED {t} {ids[k]} 1 m")
+    bad = [f"{players[ids[k + 1]].name} / BOS PG\nR{k // 8 + 1}, P{k % 8 + 1} - X" for k in range(6, 14)]
+    tr2.handle_page_text("\n".join(bad) + "\nON THE CLOCK: PICK 15")
+    assert tr2.blocked and len(tr2.picks) == 10
