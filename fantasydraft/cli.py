@@ -559,12 +559,19 @@ def cmd_benchmark(args) -> None:
     from .benchmark import benchmark, summarize
     from .io import load_players
 
-    league = load_state(args.players, args.league, None).league if args.league else None
+    if args.league:
+        # Your league's players, with its extra sources merged into the consensus.
+        state = load_state(args.players, args.league, None)
+        league, players = state.league, state.players
+        print(f"players: {args.players or 'from ' + args.league} ({len(players)})")
+    else:
+        league = None
+        players = load_players(args.players or "data/sample_players.csv")
+        print(f"players: {args.players or 'data/sample_players.csv (synthetic sample)'}")
     if league is None or league.num_teams != 10:
         from .models import League, TeamProfile
 
         league = League([TeamProfile(f"T{i}") for i in range(10)], 0)
-    players = load_players(args.players or "data/sample_players.csv")
     from .benchmark import rank_vs_projection
 
     print(rank_vs_projection(players))
