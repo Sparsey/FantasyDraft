@@ -369,7 +369,7 @@ def test_recommend_skips_players_who_never_last():
 def test_balance_targets_discount_extra_centers():
     from fantasydraft.lineup import over_targets, team_value
 
-    lg = League([TeamProfile("a"), TeamProfile("b")], 0, cover_rate=0)  # default slots: 13 players, targets 3 each
+    lg = League([TeamProfile("a"), TeamProfile("b")], 0, cover_rate=0, balance_penalty=0.2)  # 13 players, targets 3 each
     roster = [P("c1", "C", 2000), P("c2", "C", 1900), P("pfc", "PF/C", 1800)]
     c4, g = P("c4", "C", 1700), P("g", "PG", 1650)
     assert over_targets(roster + [c4], lg) == []  # PF/C counts as the PF
@@ -617,7 +617,7 @@ def test_dashboard_advice_explains_skipping_highest_projection():
           Q("Guard B", "PG", 2500, 7), Q("Center B", "C", 1000, 8)] + [Q(f"f{i}", "SF", 300 - i, 9 + i) for i in range(12)]
     players = {p.id: p for p in pl}
     teams = [TeamProfile("Opp1", "auto"), TeamProfile("Me", "adp"), TeamProfile("Opp2", "auto"), TeamProfile("Opp3", "auto")]
-    lg = League(teams, 1, roster_slots={"PG": 1, "C": 1, "BE": 2}, balance_penalty=0, cover_rate=0)
+    lg = League(teams, 1, roster_slots={"PG": 1, "C": 1, "BE": 2}, balance_penalty=0, cover_rate=0, bench_weight=0.4)
     st = DraftState(lg, players, ["Filler 0"])
     from fantasydraft.simulate import availability
 
@@ -770,7 +770,7 @@ def test_versus_highest_projection_split():
           Q("Guard B", "PG", 2500, 7), Q("Center B", "C", 1000, 8)] + [Q(f"f{i}", "SF", 300 - i, 9 + i) for i in range(12)]
     players = {p.id: p for p in pl}
     teams = [TeamProfile("Opp1", "auto"), TeamProfile("Me", "adp"), TeamProfile("Opp2", "auto"), TeamProfile("Opp3", "auto")]
-    lg = League(teams, 1, roster_slots={"PG": 1, "C": 1, "BE": 2}, balance_penalty=0, cover_rate=0)
+    lg = League(teams, 1, roster_slots={"PG": 1, "C": 1, "BE": 2}, balance_penalty=0, cover_rate=0, bench_weight=0.4)
     recs = recommend(DraftState(lg, players, ["Filler 0"]), candidates=4, sims=8)
     base, vs = versus_highest_projection(recs)
     assert base.name == "Guard A" and vs["Guard A"].diff == 0
@@ -1142,7 +1142,7 @@ def test_review_compares_with_espn_autodraft(tmp_path):
 def test_injury_cover_values_a_backup_at_a_position():
     from fantasydraft.lineup import team_value, uncovered
 
-    lg = League([TeamProfile("a"), TeamProfile("b")], 0, balance_penalty=0)
+    lg = League([TeamProfile("a"), TeamProfile("b")], 0, balance_penalty=0, cover_rate=0.12)
     roster = [P("c1", "C", 2000), P("g1", "PG", 1900), P("g2", "PG/SG", 1800), P("f1", "SF/PF", 1700),
               P("f2", "PF/SF", 1600), P("s1", "SG", 1500)]
     assert [p.name for p in uncovered(roster, lg)] == ["c1"]  # the only center
@@ -1243,3 +1243,18 @@ def test_target_is_never_below_the_floor():
     # realistic, so he is the target
     recs = [R("now", 2850, 1.0, 120), R("lasts", 3000, 1.0, 110)]
     assert Dashboard._choose_target(recs, floor_pts=2900).player.name == "now"
+
+
+def test_daily_lineups_by_default(tmp_path):
+    import json as _json
+    from fantasydraft.io import load_league
+
+    cfg = {"my_team": 1, "bench_weight": 0.4, "teams": [{"name": "a"}, {"name": "b"}]}  # an older file
+    f = tmp_path / "l.json"
+    f.write_text(_json.dumps(cfg))
+    lg = load_league(f)
+    assert (lg.bench_weight, lg.balance_penalty, lg.cover_rate) == (0.86, 0.05, 0.03)
+    f.write_text(_json.dumps({**cfg, "lineups": "weekly"}))
+    assert load_league(f).bench_weight == 0.4
+    f.write_text(_json.dumps({**cfg, "lineups": "custom", "bench_weight": 0.7}))
+    assert load_league(f).bench_weight == 0.7

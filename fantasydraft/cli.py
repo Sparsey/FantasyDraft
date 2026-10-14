@@ -305,7 +305,7 @@ def cmd_new_league(args) -> None:
     cfg = {
         "players": args.players or "data/players.csv",
         "my_team": args.my_pick,
-        "bench_weight": 0.4,
+        "lineups": "daily",
         "roster_slots": {"PG": 1, "SG": 1, "SF": 1, "PF": 1, "C": 1, "G": 1, "F": 1, "UTIL": 3, "BE": 3},
         "teams": teams,
     }
@@ -438,7 +438,7 @@ def cmd_fetch_league(args) -> None:
     scoring = client.scoring(data)
     # Everything you set by hand is kept; only what ESPN owns is refreshed.
     cfg = {
-        "players": "data/players.csv", "bench_weight": 0.4, "sources": {}, "managers": {},
+        "players": "data/players.csv", "lineups": "daily", "sources": {}, "managers": {},
         **existing,
         "my_team": my_name or my,
         "roster_slots": client.roster_slots(data),

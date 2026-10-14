@@ -200,6 +200,28 @@ def apply_manager(team: TeamProfile, managers: dict, person: str) -> TeamProfile
     return _profile(team.name, managers[person], manager=person)
 
 
+# How much bench players, position stacking and a lone player at a position
+# matter. Calibrated against simulated seasons of nightly lineups: with daily
+# lineup changes (ESPN's default) only about half the NBA plays on a given night,
+# so a bench player's games still count ~85% of the time.
+LINEUPS = {
+    "daily": {"bench_weight": 0.86, "balance_penalty": 0.05, "cover_rate": 0.03},
+    "weekly": {"bench_weight": 0.4, "balance_penalty": 0.2, "cover_rate": 0.12},
+}
+
+
+def lineup_settings(cfg: dict) -> dict:
+    """bench_weight / balance_penalty / cover_rate for the league's lineup type
+    ("lineups": "daily" (default) or "weekly"), or "custom" to set them by hand."""
+    kind = cfg.get("lineups", "daily")
+    if kind == "custom":
+        base = LINEUPS["daily"]
+        return {k: float(cfg.get(k, v)) for k, v in base.items()}
+    if kind not in LINEUPS:
+        raise ValueError(f'"lineups" must be "daily", "weekly" or "custom", not {kind!r}')
+    return dict(LINEUPS[kind])
+
+
 def load_league(path: str | Path) -> League:
     """League file -> League. Each team's profile comes from the team entry, or
     (if the entry sets no strategy) from the matching person in "managers"."""
@@ -227,13 +249,11 @@ def load_league(path: str | Path) -> League:
         teams=teams,
         my_slot=my_slot,
         roster_slots=cfg.get("roster_slots", dict(DEFAULT_ROSTER_SLOTS)),
-        bench_weight=float(cfg.get("bench_weight", 0.4)),
+        **lineup_settings(cfg),
         position_targets=cfg.get("position_targets"),
-        balance_penalty=float(cfg.get("balance_penalty", 0.2)),
         learn_noise=bool(cfg.get("learn_noise", True)),
         position_bias=float(cfg.get("position_bias", 0.35)),
         start_auto=start_auto,
-        cover_rate=float(cfg.get("cover_rate", 0.12)),
     )
 
 

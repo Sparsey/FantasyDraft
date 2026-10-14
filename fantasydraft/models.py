@@ -117,12 +117,12 @@ class League:
     teams: list[TeamProfile]  # in first-round draft order
     my_slot: int  # 0-based index into `teams`
     roster_slots: dict[str, int] = field(default_factory=lambda: dict(DEFAULT_ROSTER_SLOTS))
-    bench_weight: float = 0.4
+    bench_weight: float = 0.86
     # Roster balance: how many players of each position you aim for, and how
     # much a player beyond those targets is discounted (0.2 = worth 80%).
     # None = an even split, rounded up (3 each for a 13-player roster).
     position_targets: dict[str, int] | None = None
-    balance_penalty: float = 0.2
+    balance_penalty: float = 0.05
     # Learn each opponent's randomness from their own picks (fantasydraft.learn).
     learn_noise: bool = True
     # Opponents (not on autodraft) avoid positions they've already filled to
@@ -133,7 +133,7 @@ class League:
     start_auto: frozenset[int] = frozenset()
     # Share of games a player misses: a position with only one player who can
     # play it loses that much of his value (nobody covers the slot).
-    cover_rate: float = 0.12
+    cover_rate: float = 0.03
 
     def __post_init__(self) -> None:
         for slot in self.roster_slots:

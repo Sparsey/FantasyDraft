@@ -42,7 +42,7 @@ python -m fantasydraft watch --league examples/league.json
    | `spread` | for `feel` teams: how many of ESPN's top-ranked players they choose among (default 8) |
    | `noise` | starting guess for how unpredictable they are (0.15 ≈ ±15% of draft slot). Updated from their own picks during the draft unless `learn_noise` is `false` |
    | `favorites` | `{"Player Name": 10}` → takes that player ~10 spots early |
-   | `bench_weight` | how much bench points count vs starters (league-wide) |
+   | `lineups` | `daily` (ESPN's default: bench players' games still count ~85% of the time, so the bench is worth 0.86 of a starter, with small discounts for stacking a position or having only one player at it) or `weekly` (bench 0.4). `custom` lets you set `bench_weight`, `balance_penalty` and `cover_rate` yourself |
    | `players` | players CSV path or Google Sheets link (league-wide) |
    | `position_targets` | roster balance, e.g. `{"PG": 3, "SG": 3, "SF": 2, "PF": 2, "C": 3}`. Default: an even split rounded up (3 each for 13 players). Multi-position players count wherever there's room |
    | `learn_noise` | learn each opponent's noise (and show their best-fitting strategy) from their picks; default `true` |
