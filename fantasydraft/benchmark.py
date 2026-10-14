@@ -138,3 +138,25 @@ def summarize(results: dict[str, list[DraftResult]]) -> str:
         wins = sum(d > 0 for d in diffs) / len(diffs)
         rows.append(f"{policy:8s} {mean:17,.0f} {gain:+13,.0f} {ci:9,.0f} {wins:11.0%}")
     return "\n".join(rows)
+
+
+def rank_vs_projection(players: dict[str, Player], top: int = 150) -> str:
+    """How far ESPN's rank order departs from projection order (top players).
+
+    If they're identical, autodraft and drafting by projections make the same
+    picks, so the benchmark can't separate them."""
+    by_proj = sorted(players.values(), key=lambda p: -p.proj_points)[:top]
+    ranked = [p for p in by_proj if p.espn_rank != float("inf")]
+    if len(ranked) < 10:
+        return "ESPN ranks: missing for most players, so 'auto' falls back to ADP order."
+    rank_order = {p.id: i for i, p in enumerate(sorted(ranked, key=lambda p: p.espn_rank))}
+    diffs = [abs(rank_order[p.id] - i) for i, p in enumerate(ranked)]
+    n = len(ranked)
+    rho = 1 - 6 * sum(d * d for d in diffs) / (n * (n * n - 1))
+    moved = sum(d >= 5 for d in diffs)
+    if max(diffs) == 0:
+        return (f"ESPN rank order is IDENTICAL to projection order for the top {n} players, "
+                "so 'auto' and 'points' make the same picks. Other projection sources are "
+                "what would create a difference.")
+    return (f"ESPN rank vs projection order, top {n}: correlation {rho:.2f}, "
+            f"{moved} players 5+ spots apart, biggest gap {max(diffs)} spots.")

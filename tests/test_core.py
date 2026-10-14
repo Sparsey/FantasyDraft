@@ -467,3 +467,14 @@ def test_predict_picks_autodrafter_is_certain():
     assert [p["pick"] for p in preds] == [0, 1, 2]
     assert preds[0]["probs"] == {"pg1": 1.0}  # autodraft takes the top ESPN rank
     assert abs(sum(preds[1]["probs"].values()) - 1.0) < 1e-9
+
+
+def test_rank_vs_projection_detects_identical_order():
+    import dataclasses
+    from fantasydraft.benchmark import rank_vs_projection
+
+    players = load_players(SAMPLE)
+    assert "IDENTICAL" not in rank_vs_projection(players)
+    order = sorted(players.values(), key=lambda p: -p.proj_points)
+    same = {p.id: dataclasses.replace(p, espn_rank=float(i + 1)) for i, p in enumerate(order)}
+    assert "IDENTICAL" in rank_vs_projection(same)

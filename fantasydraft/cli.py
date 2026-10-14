@@ -493,6 +493,9 @@ def cmd_benchmark(args) -> None:
 
         league = League([TeamProfile(f"T{i}") for i in range(10)], 0)
     players = load_players(args.players or "data/sample_players.csv")
+    from .benchmark import rank_vs_projection
+
+    print(rank_vs_projection(players))
     print(f"{args.drafts} drafts x {len(args.policies)} policies, recommender sims={args.sims}")
     results = benchmark(players, league, args.drafts, args.sims, args.candidates, args.policies)
     print()
