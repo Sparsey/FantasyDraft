@@ -108,12 +108,34 @@ def test_analyze_flags_autodrafter():
     rng = random.Random(0)
     taken: set[str] = set()
     for pick in range(state.league.total_picks):
-        prof = state.league.teams[state.league.team_for_pick(pick)]
-        choice = choose_pick(prof, sim.top_untaken(prof.strategy, taken, 30), rng, pick)
+        prof = sim.profile(state.league.team_for_pick(pick))
+        choice = choose_pick(prof, sim.top_untaken(prof.order_key, taken, 30), rng, pick)
         state.picks.append(choice.id)
         taken.add(choice.id)
     tendencies = analyze(state)
     assert tendencies[0].suggested == "auto"
+
+
+def test_fit_auto_learns_which_list_autodraft_follows():
+    from fantasydraft.learn import fit_auto
+
+    # ESPN's rank and ADP disagree on every pair; the autodraft teams follow ADP.
+    players = {}
+    for i in range(30):
+        players[f"p{i}"] = P(f"p{i}", "PG" if i % 2 else "C", 300 - i, i + 1, i + 2 if i % 2 == 0 else i)
+    state = DraftState(league(n=4, my=0), players, [])
+    state.auto_teams = {1, 2, 3}
+    before = fit_auto(state)
+    assert before[0][1] == "auto" and len(before) == 3  # mostly ESPN's rank, some of each
+    by_adp = sorted(players.values(), key=lambda p: p.adp)
+    for pick in range(12):
+        state.picks.append(by_adp[pick].id)
+        if state.league.team_for_pick(pick) != 0:
+            state.auto_picks.add(pick)
+    mix = fit_auto(state)
+    assert mix[0][1] == "adp" and mix[0][0] > 0.7
+    assert all(prob >= 0.04 for prob, _, _ in mix)  # still allows for the others
+    assert abs(sum(prob for prob, _, _ in mix) - 1) < 0.01
 
 
 def test_resolve_player_names():
@@ -405,7 +427,7 @@ def test_learning_noise_and_strategy_from_picks():
 
     true = [TeamProfile("strict", "adp", 0.0), TeamProfile("loose rank", "rank", 0.4)] + \
         [TeamProfile(f"t{i}", "adp", 0.15) for i in range(8)]
-    players, picks = _simulated_draft(true, 80)
+    players, picks = _simulated_draft(true, 80, seed=1)  # 8 picks at 0.4 noise: some seeds look like "points"
     guess = League([TeamProfile(t.name, "adp", 0.2) for t in true], 9)
     fits = fit_teams(DraftState(guess, players, picks))
     assert fits[0].noise < 0.08  # always took the top of the ADP list

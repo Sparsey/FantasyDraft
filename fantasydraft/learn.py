@@ -219,3 +219,69 @@ def learned_profiles(state: DraftState) -> dict[int, TeamProfile]:
             strategy, _, view = f.strategy.partition("@")
             out[team] = replace(profile, strategy=strategy, view=view or "espn", noise=noise)
     return out
+
+
+AUTO_PRIOR_NOISE = 0.04  # what we expect before seeing any autodraft picks: almost exactly ESPN's list
+# Lists ESPN's autodraft might be following, and how likely each is before
+# seeing any autodraft picks. Mostly ESPN's rank, but mock-room autodrafters
+# vary: some lean on ADP or on projected points.
+AUTO_PRIOR = {"rank": 0.7, "adp": 0.15, "points": 0.15}
+AUTO_ORDERS = tuple(AUTO_PRIOR)
+
+
+def _auto_strategy(s: str, noise: float) -> str:
+    return "auto" if s == "rank" and noise < 0.03 else s
+
+
+def fit_auto(state: DraftState, min_picks: int = 3) -> list[tuple[float, str, float]]:
+    """The mix of lists this draft's autodraft teams follow: (probability,
+    strategy, noise), where strategy is "auto"/"rank" (ESPN's rank), "adp" or
+    "points" (ESPN's projections) and noise is how loosely (same scale as a
+    person's randomness). Pooled over all autodraft picks; each simulated
+    autodraft team draws one. Before enough picks: the prior mix."""
+    league = state.league
+    players = list(state.players.values())
+    orders = {s: order_for(BASE_LIST[s], players) for s in AUTO_ORDERS}
+    rows: list[dict[str, tuple[float, ...]]] = []
+    taken: set[str] = set()
+    for pick, pid in enumerate(state.picks):
+        if pick in state.auto_picks and league.team_for_pick(pick) != league.my_slot:
+            row = {}
+            for s, order in orders.items():
+                pool = []
+                for p in order:
+                    if p.id not in taken:
+                        pool.append(p)
+                        if len(pool) == CANDIDATE_POOL:
+                            break
+                ids = [p.id for p in pool]
+                chosen = ids.index(pid) if pid in ids else len(ids)
+                if s == "points":
+                    keys = tuple(pick + i + 1.0 for i in range(len(pool)))
+                else:
+                    keys = tuple(max(base_key(s, p), 0.1) for p in pool)
+                key = ("auto:" + s, pick, chosen, keys)
+                if key not in _CACHE:
+                    _CACHE[key] = _choice_likelihoods(keys, chosen, seed=pick * 7 + len(s))
+                row[s] = _CACHE[key]
+            rows.append(row)
+        taken.add(pid)
+    if len(rows) < min_picks:
+        return [(AUTO_PRIOR["rank"], "auto", 0.0)] + [
+            (AUTO_PRIOR[s], s, AUTO_PRIOR_NOISE) for s in AUTO_ORDERS if s != "rank"]
+    log_prior = [-((math.log(n) - math.log(AUTO_PRIOR_NOISE)) ** 2) / (2 * PRIOR_SPREAD ** 2) for n in NOISE_GRID]
+    fits = {}
+    for s in AUTO_ORDERS:
+        logw = [lp + sum(math.log(r[s][g]) for r in rows) for g, lp in enumerate(log_prior)]
+        top = max(logw)
+        w = [math.exp(x - top) for x in logw]
+        evidence = top + math.log(sum(w) / sum(math.exp(lp) for lp in log_prior))
+        noise = math.exp(sum(wi * math.log(n) for wi, n in zip(w, NOISE_GRID)) / sum(w))
+        fits[s] = (math.log(AUTO_PRIOR[s]) + evidence, noise)
+    top = max(e for e, _ in fits.values())
+    probs = {s: math.exp(e - top) for s, (e, _) in fits.items()}
+    total = sum(probs.values())
+    probs = {s: max(p / total, MIX_FLOOR) for s, p in probs.items()}  # autodrafters vary: keep some of each
+    total = sum(probs.values())
+    return sorted(((round(probs[s] / total, 3), _auto_strategy(s, n), round(n, 3))
+                   for s, (_, n) in fits.items()), reverse=True)

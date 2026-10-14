@@ -12,6 +12,10 @@ from .models import Player, TeamProfile
 # this keeps simulations fast.
 CANDIDATE_POOL = 30
 
+# Standard normal draws, looked up by a uniform random number: much faster
+# than random.gauss in the simulation's innermost loop.
+_NORMALS = [random.Random(12345).gauss(0.0, 1.0) for _ in range(8192)]
+
 
 def _finite(x: float, fallback: float) -> float:
     return x if math.isfinite(x) else fallback
@@ -101,7 +105,9 @@ def choose_pick(
         raise ValueError("no players available")
     strategy = profile.strategy
     if strategy == "auto":
-        return ordered[0]
+        if not profile.noise:
+            return ordered[0]
+        bias = 0.0  # autodraft goes by ESPN's list (with the randomness learned from its picks)
     if strategy == "feel":
         top = list(ordered[:max(profile.spread, 1)])
         weights = feel_weights(len(top))
@@ -116,6 +122,9 @@ def choose_pick(
         pool = balanced_order(pool, counts or {}, targets or {}, profile.view)
         bias = 0.0  # position needs are already built into the order
     best, best_key = pool[0], float("inf")
+    # Keys rise down the list, so once one can't beat the best even with very
+    # lucky noise (3.5 sd), nobody further down can: stop there.
+    stretch = math.exp(3.5 * profile.noise) if not (profile.favorites or profile.team_boost) else float("inf")
     for i, p in enumerate(pool):
         if strategy in ("points", "balanced"):
             # Use the order as a pseudo draft slot so noise and favorites
@@ -128,10 +137,12 @@ def choose_pick(
         if profile.team_boost and p.nba_team == profile.favorite_team:
             key -= profile.team_boost  # a fan of this team reaches for its players
         key = max(key, 0.1)
+        if key > best_key * stretch:
+            break
         if bias and full and p.positions <= full:
             key *= 1.0 + bias
         if profile.noise:
-            key *= math.exp(rng.gauss(0.0, profile.noise))
+            key *= math.exp(_NORMALS[int(rng.random() * 8192)] * profile.noise)
         if key < best_key:
             best, best_key = p, key
     return best
