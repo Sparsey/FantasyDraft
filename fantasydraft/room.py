@@ -41,7 +41,13 @@ class RoomTracker:
         self.players = players
         self.path = Path(picks_path)
         self.log = log
-        self.entries: list[tuple] = load_log(self.path, players, league) if self.path.exists() else []
+        self.entries: list[tuple] = []
+        unreadable = None
+        if self.path.exists():
+            try:
+                self.entries = load_log(self.path, players, league)
+            except ValueError as e:  # e.g. a picks file from a draft with more teams
+                unreadable = str(e)
         self.team_slot: dict[int, int] = {}  # ESPN team id -> 0-based draft slot
         self.pending_auto: dict[int, bool] = {}  # switches seen before a team was mapped
         self.my_team_id: int | None = None
@@ -79,6 +85,9 @@ class RoomTracker:
             outer_log(line)
 
         self.log = _log
+        if unreadable:
+            self._start_fresh(f"{self.path.name} doesn't fit this league ({unreadable}), "
+                              "so it's from another draft")
         if self.entries:
             self.log(f"resuming with {len(self.picks)} picks already in {self.path}")
 

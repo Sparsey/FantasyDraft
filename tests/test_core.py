@@ -1098,3 +1098,15 @@ def test_late_start_waits_for_the_page_and_carousel_matching_count_is_quiet(tmp_
         tr.manual_pick(ids[k])
     assert not tr.blocked and tr.picks == ids[:12]
     assert tr.team_slot == {espn[league.team_for_pick(k)]: league.team_for_pick(k) for k in range(8, 12)}
+
+
+def test_unreadable_old_picks_file_is_set_aside(tmp_path):
+    from fantasydraft.room import RoomTracker
+
+    players = load_players(SAMPLE)
+    pid = next(iter(players))
+    league = League([TeamProfile(f"Team {i + 1}") for i in range(8)], 2)
+    picks = tmp_path / "mock4.txt"
+    picks.write_text(f"{pid}\n@auto Team 9\n")  # from an earlier 10-team mock
+    tr = RoomTracker(league, players, picks, log=lambda _: None)
+    assert tr.picks == [] and list(tmp_path.glob("mock4.old-*.txt"))
