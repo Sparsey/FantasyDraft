@@ -54,9 +54,16 @@ class TeamProfile:
                   the ESPN draft board).
       - "points": drafts roughly by projected points, with noise (a "deep"
                   drafter who has done their own homework).
-      - "unknown": not set; the simulation uses whichever of adp/rank/points
-                  best fits the team's picks so far (adp before their first).
+      - "balanced": a knowledgeable drafter building a well-rounded team:
+                  ranks players by projected points scaled by how much their
+                  roster still needs that position, with (usually low) noise.
+      - "feel":   picks by feel among ESPN's top suggestions: chooses from
+                  the top `spread` players by ESPN rank, fairly evenly
+                  (#1 only mildly favoured), never outside them.
+      - "unknown": not set; the simulation uses whichever strategy best fits
+                  the team's picks so far (adp before their first).
     noise: relative standard deviation applied to the sort key (0.15 = ±15%).
+    spread: for "feel", how many of ESPN's top-ranked players they choose among.
     favorites: player name -> how many spots earlier they will take that
                player than the strategy otherwise would.
     """
@@ -65,8 +72,9 @@ class TeamProfile:
     strategy: str = "unknown"
     noise: float = 0.15
     favorites: dict[str, float] = field(default_factory=dict)
+    spread: int = 8
 
-    VALID_STRATEGIES = ("unknown", "auto", "adp", "rank", "points")
+    VALID_STRATEGIES = ("unknown", "auto", "adp", "rank", "points", "balanced", "feel")
 
     def __post_init__(self) -> None:
         if self.strategy not in self.VALID_STRATEGIES:

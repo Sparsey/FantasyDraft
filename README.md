@@ -37,7 +37,8 @@ python -m fantasydraft watch --league examples/league.json
 
    | field | meaning |
    |---|---|
-   | `strategy` | `unknown` (default: modelled by whichever of adp/rank/points best fits their picks so far), `auto` (ESPN autodraft: best ESPN rank, deterministic), `adp` (drafts around ADP), `rank` (follows ESPN's board), `points` (drafts by projections). Set it yourself when you know the person |
+   | `strategy` | `unknown` (default: modelled by whichever of adp/rank/points best fits their picks so far), `auto` (ESPN autodraft: best ESPN rank, deterministic), `adp` (drafts around ADP), `rank` (follows ESPN's board), `points` (drafts by projections), `balanced` (knowledgeable, builds a well-rounded team: projections scaled by roster need, low noise), `feel` (picks fairly evenly among ESPN's top `spread` players, default 8). Set it yourself when you know the person |
+   | `spread` | for `feel` teams: how many of ESPN's top-ranked players they choose among (default 8) |
    | `noise` | starting guess for how unpredictable they are (0.15 ≈ ±15% of draft slot). Updated from their own picks during the draft unless `learn_noise` is `false` |
    | `favorites` | `{"Player Name": 10}` → takes that player ~10 spots early |
    | `bench_weight` | how much bench points count vs starters (league-wide) |

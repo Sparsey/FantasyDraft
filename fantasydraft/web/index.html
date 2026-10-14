@@ -203,7 +203,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const pct = (x) => x == null ? "–" : x <= 0 ? "0%" : x >= 1 ? "100%" : x < 0.01 ? "<1%" : x > 0.99 ? ">99%" : Math.round(x * 100) + "%";
 const signed = (x) => (x > 0 ? "+" : "") + x;
-const STRATS = {unknown: "Unknown: learn from their picks", auto: "Autodraft (ESPN rank, no randomness)", adp: "Around ADP", rank: "Follows ESPN rank, loosely", points: "By projected points"};
+const STRATS = {unknown: "Unknown: learn from their picks", auto: "Autodraft (ESPN rank, no randomness)", adp: "Around ADP", rank: "Follows ESPN rank, loosely", points: "By projected points", balanced: "Balanced builder: best value for their roster, avoids piling up a position", feel: "By feel: picks fairly evenly among ESPN's top ~8"};
 let S = null, players = [], playersVersion = -1, tab = "recs", clockAt = 0, sel = 0, lastRender = "";
 
 function bar(p) {

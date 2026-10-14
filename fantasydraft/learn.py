@@ -9,7 +9,7 @@ the noise set in the league file. Teams that keep taking the top of their
 list quickly get a small noise; teams that wander get a larger one.
 
 The same likelihoods, summed over the noise grid, say which strategy
-(adp / rank / points) explains a team's picks best.
+(adp / rank / points / balanced / feel) explains a team's picks best.
 """
 from __future__ import annotations
 
@@ -17,11 +17,14 @@ import math
 import random
 from dataclasses import dataclass, replace
 
-from .drafters import CANDIDATE_POOL, add_to_counts, base_key, full_positions, order_for
+from .drafters import (CANDIDATE_POOL, add_to_counts, balanced_order, base_key, feel_weights,
+                       full_positions, order_for)
 from .models import DraftState, TeamProfile
 
 NOISE_GRID = (0.02, 0.04, 0.07, 0.10, 0.14, 0.19, 0.25, 0.33, 0.45)
-STRATEGIES = ("adp", "rank", "points")
+STRATEGIES = ("adp", "rank", "points", "balanced", "feel")
+# The list each strategy draws its candidates from.
+BASE_LIST = {"adp": "adp", "rank": "rank", "points": "points", "balanced": "points", "feel": "rank"}
 DRAWS = 150  # simulated choices per (pick, strategy, noise)
 PRIOR_SPREAD = 0.8  # sd of the prior on log(noise): fairly loose
 OUTSIDE = 1e-3  # likelihood of a pick from outside a strategy's top 30
@@ -64,7 +67,7 @@ def _pick_evidence(state: DraftState) -> dict[int, list[dict[str, tuple[float, .
     """Per team: for each own pick, likelihood-by-noise under each strategy."""
     league = state.league
     players = list(state.players.values())
-    orders = {s: order_for(s, players) for s in STRATEGIES}
+    orders = {b: order_for(b, players) for b in set(BASE_LIST.values())}
     taken: set[str] = set()
     evidence: dict[int, list[dict[str, tuple[float, ...]]]] = {t: [] for t in range(league.num_teams)}
     bias, targets = league.position_bias, league.targets
@@ -74,30 +77,46 @@ def _pick_evidence(state: DraftState) -> dict[int, list[dict[str, tuple[float, .
         if pick not in state.auto_picks and team != league.my_slot:
             # Same position-need adjustment the simulation applies.
             full = full_positions(counts[team], targets) if bias else frozenset()
-            row = {}
-            for s in STRATEGIES:
+            pools = {}
+            for b, order in orders.items():
                 pool = []
-                for p in orders[s]:
+                for p in order:
                     if p.id not in taken:
                         pool.append(p)
                         if len(pool) == CANDIDATE_POOL:
                             break
+                pools[b] = pool
+            row = {}
+            for s in STRATEGIES:
+                pool = pools[BASE_LIST[s]]
+                if s == "feel":
+                    # Even-ish choice among ESPN's top `spread`; noise plays no part.
+                    spread = league.teams[team].spread
+                    ids = [p.id for p in pool[:spread]]
+                    w = feel_weights(len(ids))
+                    lik = w[ids.index(pid)] / sum(w) if pid in ids else OUTSIDE
+                    row[s] = tuple(lik for _ in NOISE_GRID)
+                    continue
+                if s == "balanced":
+                    pool = balanced_order(pool, counts[team], targets)
                 ids = [p.id for p in pool]
                 chosen = ids.index(pid) if pid in ids else len(ids)
-                if s == "points":
+                if s in ("points", "balanced"):
                     raw = [pick + i + 1.0 for i in range(len(pool))]
                 else:
                     raw = [max(base_key(s, p), 0.1) for p in pool]
-                keys = tuple(k * (1.0 + bias) if full and p.positions <= full else k
-                             for k, p in zip(raw, pool))
+                if s == "balanced":  # needs are already in the order
+                    keys = tuple(raw)
+                else:
+                    keys = tuple(k * (1.0 + bias) if full and p.positions <= full else k
+                                 for k, p in zip(raw, pool))
                 key = (s, pick, chosen, keys)
                 if key not in _CACHE:
                     _CACHE[key] = _choice_likelihoods(keys, chosen, seed=pick * 7 + len(s))
                 row[s] = _CACHE[key]
             evidence[team].append(row)
         taken.add(pid)
-        if bias:
-            add_to_counts(counts[team], state.players[pid])
+        add_to_counts(counts[team], state.players[pid])
     return evidence
 
 

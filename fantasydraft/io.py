@@ -118,6 +118,7 @@ def load_league(path: str | Path) -> League:
             name=t["name"],
             strategy=t.get("strategy", "unknown"),
             noise=float(t.get("noise", 0.15)),
+            spread=int(t.get("spread", 8)),
             favorites={k: float(v) for k, v in t.get("favorites", {}).items()},
         )
         for t in cfg["teams"]

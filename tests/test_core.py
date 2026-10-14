@@ -437,3 +437,23 @@ def test_unknown_team_is_modelled_by_best_fit():
     assert sim.profile(0).strategy == "rank"
     fresh = Simulator(DraftState(guess, players, []))
     assert fresh.profile(0).strategy == "adp"  # no picks yet: default guess
+
+
+def test_feel_spreads_picks_over_espn_top():
+    from collections import Counter
+
+    pool = [P(f"r{i}", "PG", 100 - i, rank=i + 1) for i in range(20)]
+    prof = TeamProfile("son", "feel", spread=8)
+    rng = random.Random(1)
+    got = Counter(choose_pick(prof, pool, rng).name for _ in range(4000))
+    assert set(got) <= {f"r{i}" for i in range(8)}  # never outside the top 8
+    assert 0.18 < got["r0"] / 4000 < 0.28  # #1 only mildly favoured
+    assert got["r7"] / 4000 > 0.06
+
+
+def test_balanced_skips_a_position_it_has_filled():
+    pool = [P("c", "C", 2000), P("g", "PG", 1900)] + [P(f"x{i}", "SF", 1000 - i) for i in range(10)]
+    prof = TeamProfile("dad", "balanced", noise=0.0)
+    targets = {"PG": 3, "SG": 3, "SF": 3, "PF": 3, "C": 3}
+    assert choose_pick(prof, pool, random.Random(0), 40, counts={"C": 1.0}, targets=targets).name == "c"
+    assert choose_pick(prof, pool, random.Random(0), 40, counts={"C": 3.0}, targets=targets).name == "g"

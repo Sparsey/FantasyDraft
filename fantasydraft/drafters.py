@@ -21,13 +21,33 @@ def base_key(strategy: str, p: Player) -> float:
     """Sort key for a strategy; lower is better."""
     if strategy == "unknown":
         strategy = "adp"  # the default guess for a team we know nothing about
-    if strategy in ("auto", "rank"):
+    if strategy in ("auto", "rank", "feel"):
         return _finite(p.espn_rank, _finite(p.adp, 10_000.0))
     if strategy == "adp":
         return _finite(p.adp, _finite(p.espn_rank, 10_000.0))
-    if strategy == "points":
+    if strategy in ("points", "balanced"):
         return -p.proj_points
     raise ValueError(strategy)
+
+
+# "feel": weight of the i-th best ESPN-ranked player (1-based) is 1/sqrt(i).
+def feel_weights(spread: int) -> list[float]:
+    return [1.0 / math.sqrt(i) for i in range(1, max(spread, 1) + 1)]
+
+
+def need_multiplier(p: Player, counts: dict[str, float], targets: dict[str, int]) -> float:
+    """How much a "balanced" drafter values a player given their roster:
+    full value at a position they still need, less once nearly/fully filled."""
+    room = max(targets.get(pos, 0) - counts.get(pos, 0.0) for pos in p.positions)
+    if room >= 0.999:
+        return 1.0
+    if room > 0:
+        return 0.85
+    return 0.6
+
+
+def balanced_order(pool: Sequence[Player], counts: dict[str, float], targets: dict[str, int]) -> list[Player]:
+    return sorted(pool, key=lambda p: -p.proj_points * need_multiplier(p, counts, targets))
 
 
 def order_for(strategy: str, players: Iterable[Player]) -> list[Player]:
@@ -53,6 +73,8 @@ def choose_pick(
     keys: Sequence[float] | None = None,
     full: frozenset[str] = frozenset(),
     bias: float = 0.0,
+    counts: dict[str, float] | None = None,
+    targets: dict[str, int] | None = None,
 ) -> Player:
     """Pick the player `profile` takes at overall `pick` (0-based).
 
@@ -61,21 +83,33 @@ def choose_pick(
     base keys, precomputed, to save recomputing them on every simulated pick.
     Players whose positions are all in `full` (the team already has enough
     there) have their slot pushed back by `bias` (0.35 = 35% later).
+    `counts`/`targets` (the team's position counts and targets) are used by
+    the "balanced" strategy.
     """
     if not ordered:
         raise ValueError("no players available")
-    if profile.strategy == "auto":
+    strategy = profile.strategy
+    if strategy == "auto":
         return ordered[0]
+    if strategy == "feel":
+        top = list(ordered[:max(profile.spread, 1)])
+        weights = feel_weights(len(top))
+        if profile.favorites:
+            weights = [w * (3.0 if p.name in profile.favorites else 1.0) for w, p in zip(weights, top)]
+        return rng.choices(top, weights)[0]
 
-    pool = ordered[:CANDIDATE_POOL]
+    pool = list(ordered[:CANDIDATE_POOL])
+    if strategy == "balanced":
+        pool = balanced_order(pool, counts or {}, targets or {})
+        bias = 0.0  # position needs are already built into the order
     best, best_key = pool[0], float("inf")
     for i, p in enumerate(pool):
-        if profile.strategy == "points":
-            # Use points order as a pseudo draft slot so noise and favorites
+        if strategy in ("points", "balanced"):
+            # Use the order as a pseudo draft slot so noise and favorites
             # behave on the same scale as for rank-based strategies.
             key = pick + i + 1.0
         else:
-            key = keys[i] if keys is not None else base_key(profile.strategy, p)
+            key = keys[i] if keys is not None else base_key(strategy, p)
         if profile.favorites:
             key -= profile.favorites.get(p.name, 0.0)
         key = max(key, 0.1)

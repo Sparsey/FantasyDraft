@@ -38,8 +38,10 @@ class Simulator:
         players = list(state.players.values())
         self.orders = {s: order_for(s, players) for s in strategies}
         self.keys = {s: [base_key(s, p) for p in order] for s, order in self.orders.items()}
-        # "unknown" teams without picks yet are drafted as adp.
-        self.orders["unknown"], self.keys["unknown"] = self.orders["adp"], self.keys["adp"]
+        # Strategies that share a base list: "unknown" (before any picks) is
+        # drafted as adp; "feel" uses ESPN rank; "balanced" uses projections.
+        for alias, base in (("unknown", "adp"), ("feel", "rank"), ("balanced", "points")):
+            self.orders[alias], self.keys[alias] = self.orders[base], self.keys[base]
 
     def _untaken(self, strategy: str, taken: set[str]) -> Iterator[Player]:
         return (p for p in self.orders[strategy] if p.id not in taken)
@@ -118,10 +120,9 @@ class Simulator:
         bias = league.position_bias
         targets = league.targets
         counts: list[dict[str, float]] = [{} for _ in range(league.num_teams)]
-        if bias:
-            for t, roster in enumerate(self.state.rosters()):
-                for p in roster:
-                    add_to_counts(counts[t], p)
+        for t, roster in enumerate(self.state.rosters()):
+            for p in roster:
+                add_to_counts(counts[t], p)
 
         for pick in range(self.state.current_pick, league.total_picks):
             team = league.team_for_pick(pick)
@@ -138,10 +139,9 @@ class Simulator:
                 profile = self.profile(team)
                 pool, keys = self._pool(profile.strategy, taken, starts)
                 full = full_positions(counts[team], targets) if bias else frozenset()
-                choice = choose_pick(profile, pool, rng, pick, keys, full, bias)
+                choice = choose_pick(profile, pool, rng, pick, keys, full, bias, counts[team], targets)
                 taken_at[choice.id] = pick
-                if bias:
-                    add_to_counts(counts[team], choice)
+                add_to_counts(counts[team], choice)
             taken.add(choice.id)
 
         return SimResult(taken_at, my_roster, team_value(my_roster, league))
