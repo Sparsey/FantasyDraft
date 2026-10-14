@@ -11,6 +11,7 @@ the draft changes, so the page never blocks on a simulation.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -69,6 +70,11 @@ class Dashboard:
         if not str(src).startswith("http"):
             print("  (a local file, not your Google Sheet: set \"players\" in the league file to the sheet link)", flush=True)
         print(f"  {self.league.num_teams} teams, you pick #{self.league.my_slot + 1}", flush=True)
+        counts: dict[str, int] = {}
+        for p in ps:
+            for name, _ in p.sources:
+                counts[name] = counts.get(name, 0) + 1
+        self.source_names = sorted(counts, key=lambda n: -counts[n])  # "ESPN" first
         self.league_path = Path(league_path)
         self.managers = league_managers(league_path)
         self._tendencies: tuple[int, list] = (-1, [])
@@ -123,16 +129,18 @@ class Dashboard:
             try:
                 if not self._publish(version, self._quick(st), "quick"):
                     continue
-                probs = None
+                probs, outlook = None, None
                 if not st.is_complete and st.my_next_picks():
-                    probs = availability(st, sims=availability_sims(self.sims), seed=1)
-                    if not self._publish(version, self._quick(st, probs), "chances"):
+                    likely: dict[str, float] = {}
+                    probs = availability(st, sims=availability_sims(self.sims), seed=1, likely=likely)
+                    outlook = self._outlook(st, probs, likely)
+                    if not self._publish(version, {**self._quick(st, probs), "outlook": outlook}, "chances"):
                         continue
                 self._predict(st)
                 self._refresh_tendencies(st, version)  # cheap; don't wait for the slow stage
                 if self.tracker.version != version:
                     continue
-                result = self._compute(st, probs)
+                result = {**self._compute(st, probs), "outlook": outlook}
             except Exception:
                 traceback.print_exc()
                 result = {"error": "recommendation failed — see terminal"}
@@ -190,6 +198,29 @@ class Dashboard:
                          "is_baseline": probs is not None and p is espn_top})
         return {"recs": rows, "advice": None, "has_sources": self._has_sources(st),
                 "underrated": self._underrated(st, probs or {})}
+
+    @staticmethod
+    def _outlook(st: DraftState, probs: dict, likely: dict[str, float]) -> dict | None:
+        """What you can expect at your next pick when you're not on the clock:
+        who is likely the best player left (by your projections), and players
+        ESPN ranks before your pick who could still fall to you."""
+        mine = st.my_next_picks()
+        if not mine or mine[0] == st.current_pick:
+            return None
+        pick = mine[0] + 1
+
+        def brief(p: Player, chance: float) -> dict:
+            rank = p.espn_rank if math.isfinite(p.espn_rank) else None
+            return {"name": p.name, "pos": _pos(p), "p": round(chance, 2), "proj": round(p.proj_points),
+                    "espn": round(p.room_points), "rank": None if rank is None else int(rank)}
+
+        top = sorted(likely.items(), key=lambda kv: -kv[1])[:4]
+        fallers = [p for p in st.available()
+                   if math.isfinite(p.espn_rank) and p.espn_rank <= pick - 3 and (probs.get(p.id) or [0])[0] >= 0.15]
+        fallers.sort(key=lambda p: -p.proj_points)
+        return {"pick": pick, "away": mine[0] - st.current_pick,
+                "likely": [brief(st.players[pid], c) for pid, c in top if c >= 0.05],
+                "fallers": [brief(p, probs[p.id][0]) for p in fallers[:4]]}
 
     @staticmethod
     def _player_fields(p: Player) -> dict:
@@ -362,6 +393,7 @@ class Dashboard:
             },
             "feed": feed,
             "me": {"slot": lg.my_slot, "name": names[lg.my_slot]},
+            "sources": self.source_names,
             "teams": [{
                 "score": round(scores[i]["value"]), "starters": round(scores[i]["starters"]),
                 "starters_rank": 1 + sum(s["starters"] > scores[i]["starters"] for s in scores),
@@ -402,6 +434,7 @@ class Dashboard:
         # The top recommendation once the full comparison is in (already without anyone just drafted).
         top_rec = (result.get("recs") or [None])[0] if result.get("stage") == "full" else None
         taken = set(st.picks)
+        taken_names = {st.players[pid].name for pid in taken if pid in st.players}
         for row in self.predictions:
             if row["pick"] < pick:
                 continue
@@ -411,6 +444,9 @@ class Dashboard:
                 "auto": slot in st.auto_teams, "now": row["pick"] == pick,
                 "likely": [{**brief(pid), "p": p} for pid, p in row["probs"].items() if pid not in taken][:3],
                 "rec": top_rec["name"] if slot == lg.my_slot and top_rec and row["pick"] == st.my_next_picks()[0] else None,
+                "best_left": [x for x in (result.get("outlook") or {}).get("likely", [])
+                              if x["name"] not in taken_names][:3]
+                             if slot == lg.my_slot and row["pick"] == st.my_next_picks()[0] else None,
             })
         # How well the model has predicted opponents' picks so far.
         scored = [(self.pred_history[i], pid) for i, pid in enumerate(st.picks)

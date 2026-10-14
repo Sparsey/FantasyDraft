@@ -1033,3 +1033,17 @@ def test_resync_from_a_partial_pick_list(tmp_path):
     bad = [f"{players[ids[k + 1]].name} / BOS PG\nR{k // 8 + 1}, P{k % 8 + 1} - X" for k in range(6, 14)]
     tr2.handle_page_text("\n".join(bad) + "\nON THE CLOCK: PICK 15")
     assert tr2.blocked and len(tr2.picks) == 10
+
+
+def test_likely_best_left_at_my_pick():
+    from fantasydraft.simulate import availability
+
+    players = load_players(SAMPLE)
+    lg = League([TeamProfile(f"T{i}", "adp", 0.1) for i in range(10)], 9)
+    st = DraftState(lg, players)
+    likely: dict[str, float] = {}
+    probs = availability(st, sims=60, seed=3, likely=likely)
+    assert abs(sum(likely.values()) - 1) < 1e-9  # one best-left player per simulated draft
+    best = max(likely, key=likely.get)
+    assert probs[best][0] > 0  # the likely best-left player really is often there
+    assert all(probs[pid][0] > 0 for pid in likely)

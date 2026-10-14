@@ -71,6 +71,7 @@
   .card .ln { display: flex; justify-content: space-between; gap: 6px; line-height: 1.5; }
   .card .ln span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .card .ln span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .card .bl { font-size: 10.5px; color: var(--muted); margin: -1px 0 1px; }
   .card .act { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .card .pg { font-size: 11px; font-weight: 600; }
   .pg.hi { color: var(--good); } .pg.mid { color: var(--warn); } .pg.lo { color: var(--bad); }
@@ -94,6 +95,8 @@
                  letter-spacing: .06em; padding: 2px 7px; border-radius: 5px; }
   .tabs button.on { background: var(--accent-soft); color: var(--accent); }
   .spin { font-size: 12px; color: var(--accent); }
+  .srcs { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .srcs.none { color: var(--bad); font-weight: 600; }
   .empty-note { padding: 14px 12px; color: var(--muted); }
 
   /* tables */
@@ -120,6 +123,7 @@
   .gap small { font-weight: 500; opacity: .8; }
   .gap.gup { color: var(--good); background: var(--good-soft); }
   .gap.gdn { color: var(--bad); background: var(--bad-soft); }
+  .outlook { padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px dashed var(--line); color: var(--ink); }
   .agr { font-size: 10.5px; font-weight: 600; color: var(--muted); margin-left: 4px; }
   .advice { margin: 8px 10px 4px; padding: 8px 11px; border-radius: 8px; font-size: 13px; line-height: 1.45;
             background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
@@ -181,6 +185,7 @@
   <section class="panel p-recs">
     <div class="head">
       <div class="tabs"><button class="on" data-tab="recs">Recommendations</button><button data-tab="under" id="undertab" hidden title="Players your sources rate well above ESPN: the room will let them slide, so they're targets for later rounds">Sleepers</button></div>
+      <span class="srcs" id="srcs"></span>
       <span class="spin" id="spin"></span>
       <div class="posbar" id="posbar" title="Your roster by position, against your targets (your full lineup is in ESPN's My Team)"></div>
     </div>
@@ -226,15 +231,25 @@ const projCells = (x) => {
   return `<td class="num muted">${x.espn != null ? x.espn.toLocaleString() : "–"}</td>
     <td class="num"><b>${x.proj.toLocaleString()}</b></td><td class="num" title="${esc(t)}">${pill}</td>`;
 };
+function outlookHtml(o) {
+  if (!o) return "";
+  const who = (x) => `<b>${esc(x.name)}</b> ${pct(x.p)}`;
+  const lk = o.likely.length ? `<div><b>Likely best left at your pick #${o.pick}</b> (${o.away} picks away, by your projections): ` +
+    o.likely.map(who).join(" · ") + `</div>` : "";
+  const fl = o.fallers.length ? `<div style="margin-top:3px">Could fall to you (ESPN ranks them before #${o.pick}): ` +
+    o.fallers.map((x) => `<b>${esc(x.name)}</b> <span class="muted">ESPN #${x.rank}</span> ${pct(x.p)}`).join(" · ") + `</div>` : "";
+  return lk || fl ? `<div class="outlook">${lk}${fl}</div>` : "";
+}
 function renderAdvice(a, r) {
   const box = $("advice");
+  const ol = outlookHtml(r && r.outlook);
   if (!a && r && r.stage && r.stage !== "full" && (r.recs || []).length) {
     box.hidden = false; box.className = "advice";
-    box.innerHTML = r.stage === "quick" ? "Available players by your projections. Chances of lasting to your pick in a moment…"
-      : "Comparing the options over simulated drafts (vs SAFE, GAMBLE)…";
+    box.innerHTML = ol + (r.stage === "quick" ? "Available players by your projections. Chances of lasting to your pick in a moment…"
+      : "Comparing the options over simulated drafts (vs SAFE, GAMBLE)…");
     return;
   }
-  if (!a) { box.hidden = true; return; }
+  if (!a) { box.hidden = !ol; box.className = "advice"; box.innerHTML = ol; return; }
   box.hidden = false;
   box.className = "advice " + a.kind;
   const g = a.gamble;
@@ -242,13 +257,13 @@ function renderAdvice(a, r) {
       ${pct(g.p_better)} chance of a better final roster (avg +${g.avg_up}), ${pct(g.p_worse)} worse (avg ${g.avg_down}).
       Overall ${g.diff >= 0 ? "+" : ""}${g.diff}.</div>` : "";
   if (a.kind === "same") {
-    box.innerHTML = `<span class="ptag safe" style="margin:0 6px 0 0">SAFE</span>Top pick at #${a.pick}: <b>${esc(a.top)}</b>, ESPN's top-projected player available.` + gl;
+    box.innerHTML = ol + `<span class="ptag safe" style="margin:0 6px 0 0">SAFE</span>${S.status.picks_until ? "If still there at" : "Top pick at"} #${a.pick}: <b>${esc(a.top)}</b>, ESPN's top-projected player available.` + gl;
     return;
   }
   const head = a.kind === "close"
     ? `Close call at #${a.pick}: <b>${esc(a.top)}</b> (${a.top_proj.toLocaleString()}) edges out ESPN's top-projected <b>${esc(a.best)}</b> (ESPN ${a.best_proj.toLocaleString()}) by only ${a.gain} pts of final roster value. Either is fine.`
     : `Take <b>${esc(a.top)}</b> (${a.top_proj.toLocaleString()}) over ESPN's top-projected <b>${esc(a.best)}</b> (ESPN ${a.best_proj.toLocaleString()}) at #${a.pick}: about <b>+${a.gain}</b> pts for your final roster.`;
-  box.innerHTML = head + `<ul>${a.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` +
+  box.innerHTML = ol + head + `<ul>${a.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>` +
     (g && g.name !== a.top ? gl : "");
 }
 function tagTxt(x) {
@@ -324,6 +339,9 @@ function render() {
       `Opening the draft room's Pick History can also fix it.`;
 
   renderStrip();
+  const src = S.sources || [];
+  $("srcs").className = "srcs" + (src.length > 1 ? "" : " none");
+  $("srcs").textContent = src.length > 1 ? "Mine = " + src.join(" + ") : "Mine = ESPN only (no extra sources loaded)";
   const r = S.result || {};
   $("undertab").hidden = !r.has_sources;
   $("spin").textContent = r.error || (!S.computing ? "" : r.stage === "quick" ? "working out chances…"
@@ -362,7 +380,9 @@ function renderStrip() {
   }
   for (const c of cards) {
     const head = `<div class="ch"><b>#${c.pick}</b><span class="tm">${c.now ? "ON CLOCK · " : ""}${esc(c.mine ? "YOU" : c.team)}</span>${tag(c)}</div>`;
-    const body = c.mine && c.rec ? `<div class="act" title="Top recommendation">→ ${esc(c.rec)}</div>`
+    const body = c.mine && c.best_left && c.best_left.length && !c.now
+      ? `<div class="bl">best left for you:</div>` + c.best_left.map((x) => `<div class="ln"><span>${esc(x.name)}<span class="pos">${esc(x.pos)}</span></span><span>${pct(x.p)}</span></div>`).join("")
+      : c.mine && c.rec ? `<div class="act" title="Top recommendation">→ ${esc(c.rec)}</div>`
       : c.likely.map((x) => `<div class="ln"><span>${esc(x.name)}<span class="pos">${esc(x.pos)}</span></span><span>${pct(x.p)}</span></div>`).join("");
     html += `<div class="card${c.now ? " now" : ""}${c.mine ? " mine" : ""}" ${c.now ? 'id="nowcard"' : ""}>${head}${body}</div>`;
   }

@@ -184,17 +184,22 @@ class Simulator:
         return SimResult(taken_at, my_roster, team_value(my_roster, league), order)
 
 
-def availability(state: DraftState, sims: int = 200, seed: int = 0) -> dict[str, list[float]]:
+def availability(state: DraftState, sims: int = 200, seed: int = 0,
+                 likely: dict[str, float] | None = None) -> dict[str, list[float]]:
     """P(each available player is still there at each of my upcoming picks).
 
     My own picks are skipped in these simulations, so this answers "if I pass
     on X, will X be there at that turn?" (slightly pessimistic for later picks,
     since the players I would have taken stay in the opponents' pool). Returns player id -> [P(avail at my 1st upcoming
     pick), P(... 2nd), ...].
+
+    `likely`, if given, is filled with how often each player is the best one
+    left (by my projections) when my next pick comes up.
     """
     sim = Simulator(state)
     my_picks = state.my_next_picks()
     counts = {p.id: [0] * len(my_picks) for p in state.available()}
+    by_mine = sorted(state.available(), key=lambda p: p.proj_points, reverse=True)
     rng = random.Random(seed)
     for _ in range(sims):
         result = sim.run(rng, i_pick=False)
@@ -203,6 +208,10 @@ def availability(state: DraftState, sims: int = 200, seed: int = 0) -> dict[str,
             for k, mp in enumerate(my_picks):
                 if t is None or t > mp:
                     row[k] += 1
+        if likely is not None and my_picks:
+            best = next((p for p in by_mine if result.taken_at.get(p.id, my_picks[0] + 1) > my_picks[0]), None)
+            if best is not None:
+                likely[best.id] = likely.get(best.id, 0) + 1 / sims
     return {pid: [c / sims for c in row] for pid, row in counts.items()}
 
 
