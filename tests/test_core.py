@@ -1333,7 +1333,7 @@ def test_source_with_header_over_two_rows(tmp_path):
              "Category value", ""],
             ["", "", "", "", "", "MPG", "PTS", "REB", "AST", "STL", "BLK", "3PM", "FGM", "FG%", "FTM", "FT%", "TO"],
             ["1", "Nikola Jokic", "DEN", "5.1", "72", "35", "27", "12.5", "10", "1.5", "0.8", "1.2", "10.4", "0.58",
-             "4.9", "0.82", "3.1"]]
+             "4.9", "82.0%", "3.1"]]  # a percentage cell as Sheets exports it
     path = tmp_path / "snb.csv"
     with open(path, "w", newline="") as f:
         csv.writer(f).writerows(rows)

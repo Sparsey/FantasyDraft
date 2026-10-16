@@ -90,7 +90,7 @@ def clean_name(cell: str) -> str:
 
 
 def _num(cell: str) -> float | None:
-    cell = (cell or "").strip().replace(",", "")
+    cell = (cell or "").strip().replace(",", "").rstrip("%").strip()  # Sheets exports 48.5% as "48.5%"
     try:
         return float(cell)
     except ValueError:
