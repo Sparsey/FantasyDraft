@@ -560,7 +560,7 @@ def cmd_mock_draft(args) -> None:
     league = Path(args.league)
     cmd_new_league(argparse.Namespace(
         out=str(league), teams=args.teams, my_pick=args.pick, players=None, names=None,
-        strategy="unknown", noise=0.2, like=args.like, force=True))
+        strategy="unknown", noise=0.3, like=args.like, force=True))
     Path("mocks").mkdir(exist_ok=True)
     picks = Path("mocks") / time.strftime("mock-%Y%m%d-%H%M.txt")
     shutil.copyfile(league, picks.with_name(picks.stem + ".league.json"))  # for `review` later
