@@ -82,6 +82,7 @@ def recommend(
     sims: int = 100,
     seed: int = 0,
     avail: dict[str, list[float]] | None = None,
+    cancel=None,
 ) -> list[Recommendation]:
     """Rank candidates for my next pick by simulated end-of-draft roster value.
 
@@ -91,6 +92,9 @@ def recommend(
 
     Every candidate is evaluated on the same random seeds (common random
     numbers), so differences between them reflect the pick, not luck.
+
+    cancel: called now and then; if it returns True the work is out of date
+    (a new pick came in) and an empty list is returned at once.
     """
     if not state.my_next_picks():
         return []
@@ -111,6 +115,8 @@ def recommend(
     for p in candidate_pool(state, candidates, exclude=gone, avail_probs=avail):
         values, drawn = [], []
         for i in range(sims):
+            if cancel is not None and i % 10 == 0 and cancel():
+                return []
             run = sim.run(random.Random(seed * 1_000_003 + i), my_next=p)
             values.append(run.my_value)
             # Also score the final roster on one possible "truth": each player's
@@ -135,14 +141,19 @@ def recommend(
     return out
 
 
-def autodraft_value(state: DraftState, sims: int = 100, seed: int = 0) -> float:
+def autodraft_value(state: DraftState, sims: int = 100, seed: int = 0, cancel=None) -> float:
     """Your average final roster value if ESPN autodrafted for you from here on,
     over the same simulated drafts `recommend` uses (same seeds), so a plan's
     value minus this is what the plan gains over autodraft."""
     if not state.my_next_picks():
         return 0.0
     sim = Simulator(state)
-    return mean(sim.run(random.Random(seed * 1_000_003 + i), me_auto=True).my_value for i in range(sims))
+    values = []
+    for i in range(sims):
+        if cancel is not None and i % 10 == 0 and cancel():
+            return 0.0
+        values.append(sim.run(random.Random(seed * 1_000_003 + i), me_auto=True).my_value)
+    return mean(values)
 
 
 @dataclass

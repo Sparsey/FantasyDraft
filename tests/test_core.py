@@ -1425,3 +1425,15 @@ def test_history_profile_is_a_first_guess_the_picks_can_overturn():
     assert Simulator(state).profile(0).strategy == "points"  # before much evidence: the history
     fit = fit_teams(DraftState(guess, players, picks))[0]
     assert fit.strategy == "adp" and fit.fit["adp"] > 0.6
+
+
+def test_recommend_stops_when_a_newer_pick_comes_in():
+    from fantasydraft.recommend import autodraft_value
+    import time
+
+    state = _tiny_state(["auto", "adp", "points", "adp"], picks=["pg1"], my=1)
+    start = time.time()
+    assert recommend(state, sims=500, cancel=lambda: True) == []
+    assert autodraft_value(state, sims=500, cancel=lambda: True) == 0.0
+    assert time.time() - start < 0.5
+    assert recommend(state, sims=5, cancel=lambda: False)  # not cancelled: works as before

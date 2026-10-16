@@ -164,7 +164,7 @@ class Dashboard:
                 self._refresh_tendencies(st, version)  # cheap; don't wait for the slow stage
                 if self.tracker.version != version:
                     continue
-                result = {**self._compute(st, probs), "outlook": outlook}
+                result = {**self._compute(st, probs, version), "outlook": outlook}
             except Exception:
                 traceback.print_exc()
                 result = {"error": "recommendation failed — see terminal"}
@@ -370,14 +370,18 @@ class Dashboard:
     def _has_sources(st: DraftState) -> bool:
         return any(len(p.sources) > 1 for p in st.players.values())
 
-    def _compute(self, st: DraftState, probs: dict | None = None) -> dict:
+    def _compute(self, st: DraftState, probs: dict | None = None, version: int | None = None) -> dict:
         if st.is_complete or not st.my_next_picks():
             return {"recs": []}
         # One availability run, shared by the recommendations and the advice.
         if probs is None:
             probs = availability(st, sims=availability_sims(self.sims), seed=1)
-        recs = recommend(st, candidates=self.candidates, sims=self.sims, avail=probs)
-        auto_value = autodraft_value(st, sims=self.sims)
+        # Stop as soon as a newer pick comes in: its chances matter more.
+        cancel = (lambda: self.tracker.version != version) if version is not None else None  # noqa: E731
+        recs = recommend(st, candidates=self.candidates, sims=self.sims, avail=probs, cancel=cancel)
+        auto_value = autodraft_value(st, sims=self.sims, cancel=cancel)
+        if cancel is not None and cancel():
+            return {"recs": []}  # never shown: the worker sees the newer pick and starts over
         # The target: never below the floor (someone at least that good is
         # guaranteed); among those, the best plan with an even or better chance of
         # being there, else the one most likely to be there.
