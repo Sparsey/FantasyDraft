@@ -24,7 +24,7 @@ from pathlib import Path
 
 from .analyze import analyze
 from .drafters import CANDIDATE_POOL, choose_pick
-from .io import load_log, load_picks, placeholder_player, load_state, player_by_rank, resolve_player, resolve_team, save_log, save_picks, save_players
+from .io import load_league, load_log, load_picks, placeholder_player, load_state, player_by_rank, resolve_player, resolve_team, save_log, save_picks, save_players
 from .models import DraftState
 from .recommend import recommend
 from .simulate import Simulator, availability
@@ -455,13 +455,34 @@ def cmd_fetch_league(args) -> None:
         "autodraft_top": 1.0,
     }
     out.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    print("Draft order:")
+    print("Draft order, and how each team is predicted before it has picked:")
+    try:
+        lg = load_league(out)
+    except Exception as e:  # e.g. my_team not found yet
+        lg = None
+        print(f"  (couldn't load the league file: {e})")
     for i, t in enumerate(teams):
-        print(f"  {i + 1:>2}. {t['name']}" + (f" ({t['owner']})" if t.get("owner") else "")
-              + ("   <- you" if t["name"] == my_name else ""))
+        line = f"  {i + 1:>2}. {t['name']}" + (f" ({t['owner']})" if t.get("owner") else "")
+        if t["name"] == my_name:
+            line += "   <- you"
+        elif lg is not None:
+            line += "   " + _model_note(lg, i)
+        print(line)
     me = cfg["my_team"]
     print(f"wrote {out}. You are: {me if isinstance(me, str) else f'draft position {me}'}"
           " (check 'my_team' is right once ESPN sets the draft order)")
+
+
+def _model_note(lg, i: int) -> str:
+    """How team i is simulated before its first pick, and where that came from."""
+    prof = lg.teams[i]
+    src = f"from {prof.manager}'s past drafts" if prof.manager else "no history for this team"
+    if i in lg.start_auto:
+        return f"autodraft ({src})"
+    if prof.strategy == "unknown":
+        return f"ADP or ESPN rank, half and half, randomness {prof.noise:g} ({src})"
+    view = f"@{prof.view}" if prof.strategy in ("points", "balanced") and prof.view != "espn" else ""
+    return f"{prof.strategy}{view}, randomness {prof.noise:g} ({src})"
 
 
 def cmd_live(args) -> None:

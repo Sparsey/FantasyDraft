@@ -1344,3 +1344,76 @@ def test_source_with_header_over_two_rows(tmp_path):
     assert abs(shots["FGA"] - 10.4 / 0.58) < 1e-9 and abs(shots["FTA"] - 4.9 / 0.82) < 1e-9  # exact from makes
     assert clean_name("Tyrese HaliburtonRet") == "Tyrese Haliburton" and clean_name("Joel EmbiidGTD") == "Joel Embiid"
     assert clean_name("Jalen Brunson") == "Jalen Brunson" and clean_name("Kel'el Ware") == "Kel'el Ware"
+
+
+def test_managers_from_history_drive_each_team_before_it_picks(tmp_path, monkeypatch, capsys):
+    """history -> league.json managers; fetch-league -> teams with owners; each
+    team starts the draft with its manager's model, before any picks."""
+    import argparse
+    import json
+    import fantasydraft.espn as espn
+    from fantasydraft.cli import cmd_fetch_league
+    from fantasydraft.history import ManagerHistory, merge_managers
+
+    def hist(owner, team, picks, auto, best=None, p=0.0, noise=None):
+        return ManagerHistory(owner=owner, team=team, abbrev="", picks=picks, auto_picks=auto, best=best,
+                              best_p=p, noise=noise, top_rank_rate=0.0, reach_vs_adp=0.0,
+                              favorite_team="", favorite_count=0, fit={})
+    managers = merge_managers({}, [
+        hist("Logan Mahnken", "Waiver Warrior", 13, 0, "balanced", 0.85, 0.28),
+        hist("Hrishik Duda", "Al Shaida", 13, 0, "points", 0.56, 0.17),  # a weaker fit still counts
+        hist("Jack Griffiths", "KFC Avoiders", 0, 13),  # always on autodraft
+        hist("Nathan Thakur", "Osama bin ballin", 13, 0, "points", 0.83, 0.10),
+    ])
+
+    class Fake:
+        def __init__(self, *a):
+            pass
+
+        def league(self):
+            return {"teams": [{"id": 4, "owners": ["{ME}"]}]}
+
+        team_names = staticmethod(lambda d: {1: "New Name", 2: "Al Shaida", 3: "KFC", 4: "L'Hospital", 5: "Rookie"})
+        team_owners = staticmethod(lambda d: {1: "Logan Mahnken & Ryan Mahnken", 2: "Hrishik Duda",
+                                              3: "Jack Griffiths", 4: "Aaron Solomon", 5: "Someone New"})
+        pick_order = staticmethod(lambda d: [3, 1, 4, 2, 5])
+        roster_slots = staticmethod(lambda d: {"PG": 1, "C": 1, "UTIL": 1, "BE": 1})
+        scoring = staticmethod(lambda d: {})
+
+    monkeypatch.setattr(espn, "EspnClient", Fake)
+    out = tmp_path / "league.json"
+    out.write_text(json.dumps({"players": "x", "my_team": "L'Hospital", "managers": managers, "teams": []}))
+    cmd_fetch_league(argparse.Namespace(league_id=1, season=2027, espn_s2=None, swid="{me}", dump=None, out=str(out)))
+    printed = capsys.readouterr().out
+    assert "L'Hospital (Aaron Solomon)   <- you" in printed
+    assert "balanced, randomness 0.28 (from Logan Mahnken's past drafts)" in printed  # co-owned, renamed team
+
+    from fantasydraft.io import load_league
+    lg = load_league(out)
+    players = {p.id: p for p in [P(f"p{i}", "PG" if i % 2 else "C", 300 - i, i + 1, i + 1) for i in range(30)]}
+    sim = Simulator(DraftState(lg, players, []))
+    by_name = {t.name: i for i, t in enumerate(lg.teams)}
+    assert lg.my_slot == by_name["L'Hospital"]
+    logan = sim.profile(by_name["New Name"])
+    assert (logan.strategy, logan.noise, logan.manager) == ("balanced", 0.28, "Logan Mahnken")
+    hrishik = sim.profile(by_name["Al Shaida"])
+    assert (hrishik.strategy, hrishik.noise) == ("points", 0.17)
+    assert sim.profile(by_name["KFC"]).strategy == "auto"  # starts on autodraft, as last year
+    assert by_name["KFC"] in DraftState(lg, players, []).auto_teams
+    # No history: drafts by ADP or ESPN rank, half and half, until his picks say otherwise.
+    rookie = by_name["Rookie"]
+    assert [p.strategy for _, p in sim.mixes[rookie]] == ["adp", "rank"]
+
+
+def test_history_profile_is_a_first_guess_the_picks_can_overturn():
+    from fantasydraft.learn import fit_teams
+
+    true = [TeamProfile("changed", "adp", 0.03)] + [TeamProfile(f"t{i}", "adp", 0.15) for i in range(9)]
+    players, picks = _simulated_draft(true, 80, seed=2)
+    # Last season said "points"; this year they follow ADP.
+    guess = League([TeamProfile("changed", "points", 0.12, manager="Them")] +
+                   [TeamProfile(t.name, "adp", 0.2) for t in true[1:]], 9)
+    state = DraftState(guess, players, picks[:1])
+    assert Simulator(state).profile(0).strategy == "points"  # before much evidence: the history
+    fit = fit_teams(DraftState(guess, players, picks))[0]
+    assert fit.strategy == "adp" and fit.fit["adp"] > 0.6

@@ -42,6 +42,9 @@ RECENT_HALF_LIFE = 6.0
 # Unknown teams are simulated as a mix of the strategies that fit; ones below
 # this share are dropped.
 MIX_FLOOR = 0.05
+# A team whose strategy comes from its manager's past drafts (`history`):
+# the prior chance it drafts that way again.
+MANAGER_PRIOR = 0.7
 
 
 @dataclass
@@ -159,12 +162,19 @@ def fit_teams(state: DraftState) -> dict[int, TeamFit]:
             w = [math.exp(x - top) for x in logw]
             posts[s] = [x / sum(w) for x in w]
             evidence[s] = top + math.log(sum(w))
-        top = max(evidence.values())
-        z = sum(math.exp(e - top) for e in evidence.values())
-        fit = {s: math.exp(e - top) / z for s, e in evidence.items()}
         key = profile.strategy
         if key in ("points", "balanced") and profile.view != "espn":
             key = f"{key}@{profile.view}"
+        from_history = bool(profile.manager) and key in evidence
+        if from_history:
+            # The manager's past drafts are a strong first guess (MANAGER_PRIOR),
+            # which this draft's picks can overturn.
+            for s in evidence:
+                share = MANAGER_PRIOR if s == key else (1 - MANAGER_PRIOR) / (len(evidence) - 1)
+                evidence[s] += math.log(share)
+        top = max(evidence.values())
+        z = sum(math.exp(e - top) for e in evidence.values())
+        fit = {s: math.exp(e - top) / z for s, e in evidence.items()}
         if key in fit or profile.strategy == "unknown":
             saved = key if key in fit else max(fit, key=fit.get)
             noise_key = saved
@@ -177,6 +187,14 @@ def fit_teams(state: DraftState) -> dict[int, TeamFit]:
 
         def noise_for(s: str) -> float:  # posterior mean in log space (noise is a scale)
             return round(math.exp(sum(w * math.log(x) for w, x in zip(posts[s], NOISE_GRID))), 3)
+        if from_history:
+            # Mostly the manager's usual way, unless the picks say otherwise.
+            saved = max(fit, key=fit.get)
+            kept = {s: p for s, p in fit.items() if p >= MIX_FLOOR}
+            total = sum(kept.values())
+            mix = {s: (p / total, noise_for(s)) for s, p in sorted(kept.items(), key=lambda kv: -kv[1])}
+            out[team] = TeamFit(len(rows), saved, noise_for(saved), prior_noise, fit, mix)
+            continue
         if profile.strategy != "unknown":
             mix = {saved: (1.0, noise_for(noise_key))}
         else:

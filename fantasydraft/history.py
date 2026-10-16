@@ -44,7 +44,7 @@ class ManagerHistory:
         total = self.picks + self.auto_picks
         if total and self.auto_picks / total >= 0.6:
             out["strategy"] = "auto"
-        elif self.best and self.best_p >= 0.6 and self.picks >= 5:
+        elif self.best and self.best_p >= 0.5 and self.picks >= 5:
             strategy, _, view = self.best.partition("@")
             out["strategy"] = strategy
             if view:

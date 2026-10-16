@@ -187,7 +187,8 @@ def _key(text: str) -> str:
 def match_manager(managers: dict, *names: str) -> str | None:
     """The manager (person) whose name or "match" list fits any of a team's names
     (team name, owner name, abbreviation)."""
-    keys = {_key(n) for n in names if n}
+    # A co-owned team's owner reads "A & B": each person counts.
+    keys = {_key(part) for n in names if n for part in [n, *re.split(r"\s*(?:&|,| and )\s*", n)] if part}
     for person, fields in (managers or {}).items():
         aliases = [person, *fields.get("match", [])]
         if any(_key(a) in keys for a in aliases if a):
