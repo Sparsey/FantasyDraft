@@ -39,6 +39,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Draft Tools')
     .addItem('Update players from ESPN', 'updatePlayers')
+    .addItem('Update rosters from ESPN', 'updateRosters')
     .addItem('Settings (league, season, login)…', 'configure')
     .addToUi();
 }
@@ -317,4 +318,79 @@ function updatePlayers_() {
   } else {
     SpreadsheetApp.getActiveSpreadsheet().toast(summary, 'ESPN update', 8);
   }
+}
+
+
+// ---------------------------------------------------------------------------
+// Rosters: every team's current players on a "rosters" tab (rewritten each time,
+// so don't keep your own notes on that tab).
+
+var LINEUP_SLOTS = {0: 'PG', 1: 'SG', 2: 'SF', 3: 'PF', 4: 'C', 5: 'G', 6: 'F', 7: 'SG/SF', 8: 'G/F',
+                    9: 'PF/C', 10: 'F/C', 11: 'UTIL', 12: 'BE', 13: 'IR'};
+var SLOT_ORDER = ['PG', 'SG', 'SF', 'PF', 'C', 'G', 'F', 'SG/SF', 'G/F', 'PF/C', 'F/C', 'UTIL', 'BE', 'IR'];
+
+function updateRosters() {
+  try {
+    updateRosters_();
+  } catch (e) {
+    SpreadsheetApp.getUi().alert('Roster update failed: ' + e.message);
+  }
+}
+
+function updateRosters_() {
+  var s = getSettings_();
+  if (!s.leagueId || !s.season) throw new Error('set your league and season first (Draft Tools -> Settings)');
+  var url = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/' + s.season +
+            '/segments/0/leagues/' + s.leagueId + '?view=mSettings&view=mTeam&view=mRoster';
+  var headers = {'Accept': 'application/json'};
+  if (s.espnS2 && s.swid) headers['Cookie'] = 'espn_s2=' + s.espnS2 + '; SWID=' + s.swid;
+  var resp = UrlFetchApp.fetch(url, {headers: headers, muteHttpExceptions: true});
+  var code = resp.getResponseCode();
+  if (code !== 200) {
+    throw new Error('ESPN answered ' + code + (code === 401 || code === 403
+      ? ': a private league needs your espn_s2 and SWID cookies (Draft Tools -> Settings)' : ''));
+  }
+  var data = JSON.parse(resp.getContentText());
+
+  var members = {};
+  (data.members || []).forEach(function (m) {
+    members[m.id] = ((m.firstName || '') + ' ' + (m.lastName || '')).trim() || m.displayName || '';
+  });
+  var order = ((data.settings || {}).draftSettings || {}).pickOrder || [];
+  var teams = (data.teams || []).slice().sort(function (a, b) {
+    var ia = order.indexOf(a.id), ib = order.indexOf(b.id);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+
+  var rows = [['team', 'owner', 'slot', 'player', 'positions', 'nba_team', 'injury', 'espn_proj', 'id']];
+  var counted = 0;
+  teams.forEach(function (t) {
+    var name = t.name || ((t.location || '') + ' ' + (t.nickname || '')).trim() || t.abbrev || ('Team ' + t.id);
+    var owner = (t.owners || []).map(function (o) { return members[o]; }).filter(String).join(' & ');
+    var spots = [];
+    ((t.roster || {}).entries || []).forEach(function (e) {
+      var entry = e.playerPoolEntry || {};
+      var p = parsePlayer_(entry, s.season, s.rankType);
+      if (!p) return;
+      var info = entry.player || {};
+      spots.push({slot: LINEUP_SLOTS[e.lineupSlotId] || String(e.lineupSlotId), p: p,
+                  injury: info.injuryStatus || ''});
+    });
+    spots.sort(function (a, b) {
+      return (SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot)) || ((b.p.proj_points || 0) - (a.p.proj_points || 0));
+    });
+    spots.forEach(function (x) {
+      rows.push([name, owner, x.slot, x.p.name, x.p.positions, x.p.nba_team, x.injury, x.p.proj_points, x.p.id]);
+      counted++;
+    });
+  });
+  if (!counted) throw new Error('no rosters found (has the draft happened yet?)');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('rosters') || ss.insertSheet('rosters');
+  sheet.clearContents();
+  sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+  sheet.setFrozenRows(1);
+  SpreadsheetApp.getUi().alert('Rosters updated: ' + counted + ' players on ' + teams.length + ' teams (' +
+                               new Date().toLocaleString() + ').');
 }

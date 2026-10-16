@@ -48,6 +48,16 @@ class LivePick:
     auto: bool  # ESPN flagged this pick as made by autodraft
 
 
+@dataclass
+class RosterSpot:
+    team_id: int
+    team: str
+    owner: str
+    slot: str  # lineup slot now: PG ... UTIL, BE, IR
+    player: "Player"
+    injury: str  # ESPN's status: ACTIVE, DAY_TO_DAY, OUT, ...
+
+
 class EspnClient:
     def __init__(self, league_id: int, season: int, espn_s2: str | None = None, swid: str | None = None):
         self.league_id = league_id
@@ -131,6 +141,30 @@ class EspnClient:
             print(f"note: your league also scores ESPN stat ids {sorted(other)}, which projection "
                   "sources don't have; their numbers will be rescaled to ESPN's level", file=sys.stderr)
         return {**out, **other}
+
+    def league_rosters(self) -> dict:
+        """The league with every team's current roster."""
+        return self._get(self._league_path, ["mSettings", "mTeam", "mRoster"])
+
+    @staticmethod
+    def rosters(league: dict, season: int) -> list[RosterSpot]:
+        """Every rostered player: team, lineup slot and the player (with ESPN's
+        season projection by your league's scoring)."""
+        names = EspnClient.team_names(league)
+        owners = EspnClient.team_owners(league)
+        out = []
+        for t in league.get("teams", []):
+            for e in (t.get("roster") or {}).get("entries", []):
+                entry = e.get("playerPoolEntry") or {}
+                p = parse_player(entry, season)
+                info = entry.get("player") or {}
+                if p is None:
+                    continue
+                out.append(RosterSpot(
+                    team_id=t["id"], team=names.get(t["id"], str(t["id"])), owner=owners.get(t["id"], ""),
+                    slot=SLOT_IDS.get(e.get("lineupSlotId"), str(e.get("lineupSlotId", ""))),
+                    player=p, injury=str(info.get("injuryStatus") or "")))
+        return out
 
     @staticmethod
     def picks(league: dict) -> list[LivePick]:

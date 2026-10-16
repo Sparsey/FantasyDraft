@@ -1437,3 +1437,34 @@ def test_recommend_stops_when_a_newer_pick_comes_in():
     assert autodraft_value(state, sims=500, cancel=lambda: True) == 0.0
     assert time.time() - start < 0.5
     assert recommend(state, sims=5, cancel=lambda: False)  # not cancelled: works as before
+
+
+def test_rosters_csv_from_espn(tmp_path):
+    import csv
+    from fantasydraft.cli import write_rosters
+    from fantasydraft.espn import EspnClient
+
+    def entry(pid, name, slot, pts, injury="ACTIVE"):
+        return {"playerId": pid, "lineupSlotId": slot, "playerPoolEntry": {"player": {
+            "id": pid, "fullName": name, "eligibleSlots": [0, 1, 5], "proTeamId": 7, "injuryStatus": injury,
+            "stats": [{"seasonId": 2027, "statSourceId": 1, "statSplitTypeId": 0, "appliedTotal": pts}]}}}
+    league = {
+        "settings": {"draftSettings": {"pickOrder": [2, 1]}},
+        "teams": [{"id": 1, "name": "L'Hospital", "owners": ["m1"],
+                   "roster": {"entries": [entry(10, "Tyrese Maxey", 0, 3204), entry(11, "Hurt Guy", 13, 1500, "OUT")]}},
+                  {"id": 2, "name": "Waiver Warrior", "owners": ["m2"],
+                   "roster": {"entries": [entry(20, "Somebody", 12, 2000)]}}],
+        "members": [{"id": "m1", "firstName": "Aaron", "lastName": "Solomon"},
+                    {"id": "m2", "firstName": "Logan", "lastName": "Mahnken"}],
+    }
+    spots = EspnClient.rosters(league, 2027)
+    assert [(s.team, s.slot, s.player.name, s.injury) for s in spots][1] == ("L'Hospital", "IR", "Hurt Guy", "OUT")
+    mine = {"10": P("10", "PG/SG", 3343)}  # your combined projection, by player id
+    out = tmp_path / "rosters.csv"
+    summary = write_rosters(spots, mine, out, EspnClient.pick_order(league))
+    rows = list(csv.DictReader(open(out, encoding="utf-8")))
+    assert [r["team"] for r in rows] == ["Waiver Warrior", "L'Hospital", "L'Hospital"]  # draft order, then slots
+    maxey = rows[1]
+    assert (maxey["player"], maxey["slot"], maxey["owner"], maxey["mine"], maxey["espn"]) == \
+        ("Tyrese Maxey", "PG", "Aaron Solomon", "3343", "3204")
+    assert "L'Hospital" in summary[1] and "3,343" in summary[1]  # IR player not in the lineup

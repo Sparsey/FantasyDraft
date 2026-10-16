@@ -94,6 +94,25 @@ multiplied by GP. Scoring defaults to ESPN's standard points scoring. Set
 if yours differs. A `my_proj` value in the players tab still overrides
 everything.
 
+## Team rosters
+
+**Draft Tools → Update rosters from ESPN** writes every team's current
+players to a `rosters` tab: team, owner, lineup slot (IR included), player,
+positions, NBA team, injury status and ESPN's projection. Click it again
+whenever you want it up to date after trades, pickups or drops. The tab is
+rewritten each time, so keep your own notes elsewhere.
+
+If you already pasted the script before, paste the new
+[`espn_update.gs`](espn_update.gs) over it and reload the sheet to get the
+menu item.
+
+To also see **your** projections (your sources combined) next to ESPN's, use
+the command line instead. It writes `rosters.csv`:
+
+```
+python -m fantasydraft rosters --league-id 358709800 --season 2027
+```
+
 ## The players tab
 
 The script uses the tab named `players`, or the first tab if there isn't one.

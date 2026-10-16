@@ -485,6 +485,73 @@ def _model_note(lg, i: int) -> str:
     return f"{prof.strategy}{view}, randomness {prof.noise:g} ({src})"
 
 
+SLOT_ORDER = ["PG", "SG", "SF", "PF", "C", "G", "F", "SG/SF", "G/F", "PF/C", "F/C", "UTIL", "BE", "IR"]
+
+
+def write_rosters(spots, players: dict, out: Path, order: list[int] | None = None) -> list[str]:
+    """rosters.csv from ESPN roster spots; your projection (combined sources)
+    next to ESPN's. Returns a one-line summary per team."""
+    import csv as _csv
+
+    from .lineup import best_lineup
+    from .models import DEFAULT_ROSTER_SLOTS
+
+    rank = {tid: i for i, tid in enumerate(order or [])}
+    slot_rank = {s: i for i, s in enumerate(SLOT_ORDER)}
+    spots = sorted(spots, key=lambda s: (rank.get(s.team_id, 99), s.team, slot_rank.get(s.slot, 99),
+                                          -s.player.proj_points))
+    mine = lambda s: players[s.player.id].proj_points if s.player.id in players else s.player.proj_points  # noqa: E731
+    with open(out, "w", newline="", encoding="utf-8") as f:
+        w = _csv.writer(f)
+        w.writerow(["team", "owner", "slot", "player", "positions", "nba_team", "injury", "mine", "espn", "id"])
+        for s in spots:
+            w.writerow([s.team, s.owner, s.slot, s.player.name, "/".join(sorted(s.player.positions)),
+                        s.player.nba_team, s.injury, round(mine(s)), round(s.player.proj_points), s.player.id])
+    summary = []
+    slots = [k for k, n in DEFAULT_ROSTER_SLOTS.items() if k != "BE" for _ in range(n)]
+    for team in dict.fromkeys(s.team for s in spots):
+        mine_roster = [replace_points(s.player, mine(s)) for s in spots if s.team == team and s.slot != "IR"]
+        espn_roster = [s.player for s in spots if s.team == team and s.slot != "IR"]
+        best_mine = sum(p.proj_points for p in best_lineup(mine_roster, slots)[0])
+        best_espn = sum(p.proj_points for p in best_lineup(espn_roster, slots)[0])
+        n = sum(1 for s in spots if s.team == team)
+        summary.append(f"  {team[:26]:26} {n:>2} players   best lineup: mine {best_mine:>7,.0f}  ESPN {best_espn:>7,.0f}")
+    return summary
+
+
+def replace_points(p, points: float):
+    import dataclasses
+
+    return dataclasses.replace(p, proj_points=points)
+
+
+def cmd_rosters(args) -> None:
+    """Everyone's current roster from ESPN into a CSV (run again to refresh)."""
+    from .espn import EspnClient
+
+    client = EspnClient(args.league_id, args.season, args.espn_s2, args.swid)
+    data = client.league_rosters()
+    if args.dump:
+        Path(args.dump).write_text(json.dumps(data, indent=1))
+    spots = client.rosters(data, args.season)
+    if not spots:
+        sys.exit("no rosters found: is the draft done, and are your cookies set (private league)?")
+    # Your projections (ESPN + your sources), from the players sheet in the league file.
+    players = {}
+    if Path(args.league).exists():
+        try:
+            players = load_state(args.players, args.league, None).players
+        except Exception as e:
+            print(f"note: couldn't load your projections ({e}); 'mine' = ESPN's", file=sys.stderr)
+    try:
+        order = client.pick_order(data)
+    except KeyError:
+        order = None
+    summary = write_rosters(spots, players, Path(args.out), order)
+    print(f"wrote {args.out}: {len(spots)} players on {len(summary)} teams")
+    print("\n".join(summary))
+
+
 def cmd_live(args) -> None:
     """Poll ESPN's draft and mirror it into the picks file."""
     from .espn import EspnClient
@@ -884,6 +951,13 @@ def main(argv: list[str] | None = None) -> None:
     espn(p)
     p.add_argument("--out", default="league.json")
     p.set_defaults(func=cmd_fetch_league)
+
+    p = sub.add_parser("rosters", help="everyone's current roster from ESPN into rosters.csv (run again to refresh)")
+    espn(p)
+    p.add_argument("--league", default="league.json", help="league file, for your projections (sources)")
+    p.add_argument("--players", help=players_help)
+    p.add_argument("--out", default="rosters.csv")
+    p.set_defaults(func=cmd_rosters)
 
     p = sub.add_parser("ui", help="draft dashboard in your browser (live from the ESPN draft room, or manual entry)")
     files(p)
