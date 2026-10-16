@@ -84,7 +84,9 @@ def clean_name(cell: str) -> str:
         if cell[k:] == f"{first[0]}.{rest}":
             return full
     # "Name (TEAM - PG)" or FantasyPros' "Name(BKN - SF,PF)DTD": cut at the bracket.
-    return re.sub(r"\s*\(.*$", "", cell).strip()
+    cell = re.sub(r"\s*\(.*$", "", cell).strip()
+    # A status tag glued on: "Tyrese HaliburtonRet", "Joel EmbiidGTD".
+    return re.sub(r"(?<=[a-z])(Ret|Inj|INJ|GTD|DTD|Out|OUT|Sus|SUSP|IR|O|Q)$", "", cell)
 
 
 def _num(cell: str) -> float | None:
@@ -164,13 +166,31 @@ def _rows(src: str) -> list[list[str]]:
     return max(tables, key=score)
 
 
+def _is_header(row: list[str]) -> bool:
+    return sum(_key(c) is not None for c in row) >= 4 and any(_key(c) == "name" for c in row)
+
+
+def _merged(top: list[str], below: list[str]) -> list[str]:
+    """A header split over two rows (e.g. "Player", "GP" and a group label like
+    "Projected per-game stats" on top, the stat names under it): per column,
+    the lower row's name where it has one, else the top row's."""
+    n = max(len(top), len(below))
+    top, below = top + [""] * (n - len(top)), below + [""] * (n - len(below))
+    return [b if _key(b) is not None or (b.strip() and _key(a) is None) else a for a, b in zip(top, below)]
+
+
 def read_source(src: str) -> list[SourceLine]:
     rows = _rows(src)
-    header_idx = next((i for i, r in enumerate(rows)
-                       if sum(_key(c) is not None for c in r) >= 4 and any(_key(c) == "name" for c in r)), None)
-    if header_idx is None:
+    header_idx, header = None, None
+    for i, r in enumerate(rows):
+        if _is_header(r):
+            header_idx, header = i, r
+            break
+        if i + 1 < len(rows) and any(_key(c) == "name" for c in r) and _is_header(_merged(r, rows[i + 1])):
+            header_idx, header = i + 1, _merged(r, rows[i + 1])
+            break
+    if header is None:
         raise ValueError(f"{src}: no header row with a player name and stat columns found")
-    header = rows[header_idx]
     cols = {}
     for i, h in enumerate(header):
         k = _key(h)
@@ -224,6 +244,11 @@ def estimate_shooting(stats: dict[str, float], pct: dict[str, float], ft_rate: f
     With f = FG%, t = FT%, r = FTA/FGA:  PTS = 2*FGM + 3PM + FTM
     = 2f*FGA + 3PM + t*r*FGA, so FGA = (PTS - 3PM) / (2f + t*r).
     """
+    # Makes and a percentage give the attempts exactly.
+    stats = dict(stats)
+    for made, att, k in (("FGM", "FGA", "FG%"), ("FTM", "FTA", "FT%")):
+        if made in stats and att not in stats and 0 < pct.get(k, 0) <= 1:
+            stats[att] = stats[made] / pct[k]
     if all(k in stats for k in ("FGM", "FGA", "FTM", "FTA")) or not ("FG%" in pct and "FT%" in pct):
         return stats
     f, t = pct["FG%"], pct["FT%"]

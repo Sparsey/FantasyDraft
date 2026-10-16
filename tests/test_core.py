@@ -1321,3 +1321,26 @@ def test_study_finds_the_list_each_drafter_follows():
     assert verdict["follows adp"] == "ADP"
     assert verdict["follows rank"] == "ESPN rank"
     assert verdict["t1"] == "ESPN proj" and "t0" not in verdict  # t0 is on autodraft
+
+
+def test_source_with_header_over_two_rows(tmp_path):
+    import csv
+    from fantasydraft.sources import clean_name, estimate_shooting, read_source
+
+    # Stocks and Buckets: "Player"/"GP" on the first header row, stat names under
+    # a "Projected per-game stats" group label on the second.
+    rows = [["R#", "Player", "Team", "Value\nG-score", "GP", "Projected per-game stats", "", "", "", "", "", "", "", "", "",
+             "Category value", ""],
+            ["", "", "", "", "", "MPG", "PTS", "REB", "AST", "STL", "BLK", "3PM", "FGM", "FG%", "FTM", "FT%", "TO"],
+            ["1", "Nikola Jokic", "DEN", "5.1", "72", "35", "27", "12.5", "10", "1.5", "0.8", "1.2", "10.4", "0.58",
+             "4.9", "0.82", "3.1"]]
+    path = tmp_path / "snb.csv"
+    with open(path, "w", newline="") as f:
+        csv.writer(f).writerows(rows)
+    (line,) = read_source(str(path))
+    assert line.name == "Nikola Jokic" and line.gp == 72 and line.game_stats["PTS"] == 27
+    assert line.pct == {"FG%": 0.58, "FT%": 0.82}
+    shots = estimate_shooting(line.game_stats, line.pct, 0.25)
+    assert abs(shots["FGA"] - 10.4 / 0.58) < 1e-9 and abs(shots["FTA"] - 4.9 / 0.82) < 1e-9  # exact from makes
+    assert clean_name("Tyrese HaliburtonRet") == "Tyrese Haliburton" and clean_name("Joel EmbiidGTD") == "Joel Embiid"
+    assert clean_name("Jalen Brunson") == "Jalen Brunson" and clean_name("Kel'el Ware") == "Kel'el Ware"
