@@ -752,6 +752,14 @@ def test_history_from_past_draft():
     assert merged["Person20 X"]["strategy"] == "feel"  # hand-set value kept
     assert "T20" in merged["Person20 X"]["match"]
 
+    from fantasydraft.history import study_history
+    for raw in raw_players:  # last season's actual points: the reverse of ESPN's order
+        raw["player"]["stats"].append({"seasonId": 2025, "statSourceId": 0, "statSplitTypeId": 0,
+                                       "appliedTotal": 1000 + float(raw["player"]["draftRanksByRankType"]["STANDARD"]["rank"])})
+    out = study_history(data, raw_players, 2026, me="Person40")
+    assert "Data check" in out and "last season" in out and "your proj" not in out
+    assert "AUTODRAFT (5 picks)" in out
+
 
 def test_missed_picks_entered_by_hand_release_held_feed(tmp_path):
     from fantasydraft.room import RoomTracker

@@ -80,11 +80,11 @@ def study(drafts: list[tuple[str, DraftState]]) -> str:
         if not total:
             continue
         out.append(f"{g.upper()} ({total} picks): where the player taken sat among those still available")
-        out.append(f"  {'':11}" + "".join(f"{b[2]:>6}" for b in BUCKETS) + f"{'median':>8}")
+        out.append(f"  {'':12}" + "".join(f"{b[2]:>6}" for b in BUCKETS) + f"{'median':>8}")
         for name in LISTS:
             rs = places[g][name]
             row = "".join(f"{sum(lo <= r <= hi for r in rs) / len(rs):>6.0%}" for lo, hi, _ in BUCKETS)
-            out.append(f"  {name:11}{row}{statistics.median(rs):>8g}")
+            out.append(f"  {name:12}{row}{statistics.median(rs):>8g}")
         out.append(f"  #1 on at least one of these lists: {any_top[g][0] / total:.0%}")
         out.append("  median place by stage of the draft:  " + "   ".join(
             f"{ph} " + "/".join(f"{statistics.median(v[name]):g}" if v[name] else "-" for name in LISTS)

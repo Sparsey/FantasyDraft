@@ -56,7 +56,8 @@ class ManagerHistory:
         return out
 
 
-def analyze_draft(league_data: dict, players_raw: list[dict], season: int, me: str = "") -> list[ManagerHistory]:
+def draft_state(league_data: dict, players_raw: list[dict], season: int, me: str = ""):
+    """That season's draft as a DraftState, plus (owners, names, abbrevs, order, found_me)."""
     names = EspnClient.team_names(league_data)
     owners = EspnClient.team_owners(league_data)
     abbrevs = {t["id"]: t.get("abbrev", "") for t in league_data.get("teams", [])}
@@ -95,6 +96,52 @@ def analyze_draft(league_data: dict, players_raw: list[dict], season: int, me: s
     state = DraftState(league, players)
     apply_log(state, entries[: len(entries)])
     state.picks = state.picks[: league.total_picks]
+    return state, (owners, names, abbrevs, order, found_me)
+
+
+def last_season_points(players_raw: list[dict], season: int) -> dict[str, float]:
+    """Each player's actual fantasy points the season before `season` (what a
+    drafter going by last year's numbers sees)."""
+    out = {}
+    for raw in players_raw:
+        info = raw.get("player", raw)
+        for s in info.get("stats", []):
+            if s.get("statSourceId") == 0 and s.get("statSplitTypeId") == 0 and s.get("seasonId") == season - 1:
+                out[str(info.get("id", raw.get("id")))] = float(s.get("appliedTotal", 0.0))
+                break
+    return out
+
+
+def study_history(league_data: dict, players_raw: list[dict], season: int, me: str = "") -> str:
+    """`study` on a past season's draft, with last season's actual points as an
+    extra list, plus the first picks against each list as a data check."""
+    from dataclasses import replace
+
+    from .study import study
+
+    state, _ = draft_state(league_data, players_raw, season, me)
+    last = last_season_points(players_raw, season)
+    # proj_points = last season's actual points (shown as "your proj" -> "last season");
+    # espn_points = ESPN's projection for that season.
+    state.players = {pid: replace(p, espn_points=p.proj_points, proj_points=last.get(pid, 0.0))
+                     for pid, p in state.players.items()}
+    lines = [f"Data check, the first picks of {season} (a list is trustworthy if these sit near the top of it):",
+             f"  {'pick':>4}  {'player':24}{'ESPN rank':>10}{'ADP':>7}{'ESPN proj':>10}{'last season':>12}"]
+    ps = [p for p in state.players.values()]
+    by_proj = sorted(ps, key=lambda p: -p.espn_points)
+    by_last = sorted(ps, key=lambda p: -p.proj_points)
+    for k, pid in enumerate(state.picks[:15]):
+        p = state.players[pid]
+        lines.append(f"  {k + 1:>4}  {p.name[:23]:24}{p.espn_rank:>10g}{p.adp:>7.1f}"
+                     f"{'#' + str(by_proj.index(p) + 1):>10}{'#' + str(by_last.index(p) + 1):>12}")
+    return "\n".join(lines) + "\n\n" + study([(str(season), state)]).replace("your proj", "last season")
+
+
+def analyze_draft(league_data: dict, players_raw: list[dict], season: int, me: str = "") -> list[ManagerHistory]:
+    state, (owners, names, abbrevs, order, found_me) = draft_state(league_data, players_raw, season, me)
+    league = state.league
+    slots = league.roster_slots
+    players = state.players
 
     fits = fit_teams(state)
     if not found_me:  # the "me" slot is never fitted: fit slot 0 with another slot as "me"

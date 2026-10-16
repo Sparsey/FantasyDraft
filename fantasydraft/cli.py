@@ -732,6 +732,13 @@ def cmd_history(args) -> None:
     """How each league member drafted in a past season; optionally save as manager profiles."""
     from .history import fetch_history, merge_managers
 
+    if args.study:
+        from .espn import EspnClient
+        from .history import study_history
+
+        client = EspnClient(args.league_id, args.season, args.espn_s2, args.swid)
+        print(study_history(client.league(), client.players_raw(limit=500), args.season, args.me or ""))
+        return
     rows = fetch_history(args.league_id, args.season, args.espn_s2, args.swid, args.me or "")
     table = []
     for h in rows:
@@ -939,6 +946,8 @@ def main(argv: list[str] | None = None) -> None:
     espn(p)
     p.add_argument("--me", help="your name as on ESPN (so you're left out of the fitting)")
     p.add_argument("--write", metavar="LEAGUE_FILE", help="merge the results into this league file's managers")
+    p.add_argument("--study", action="store_true", help="where each pick sat on ESPN rank, ADP, ESPN's projection "
+                   "and last season's actual points, team by team (paste the output)")
     p.set_defaults(func=cmd_history)
 
     p = sub.add_parser("benchmark", help="simulated drafts: how much each pick policy gains over autodraft")
