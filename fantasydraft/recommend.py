@@ -135,6 +135,16 @@ def recommend(
     return out
 
 
+def autodraft_value(state: DraftState, sims: int = 100, seed: int = 0) -> float:
+    """Your average final roster value if ESPN autodrafted for you from here on,
+    over the same simulated drafts `recommend` uses (same seeds), so a plan's
+    value minus this is what the plan gains over autodraft."""
+    if not state.my_next_picks():
+        return 0.0
+    sim = Simulator(state)
+    return mean(sim.run(random.Random(seed * 1_000_003 + i), me_auto=True).my_value for i in range(sims))
+
+
 @dataclass
 class VsBaseline:
     """A candidate compared with taking ESPN's top-projected player (the SAFE pick), draft by draft."""

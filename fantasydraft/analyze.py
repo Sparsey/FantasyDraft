@@ -78,6 +78,12 @@ def draft_scores(state: DraftState) -> list[dict]:
     slots are worth (players falling to them, others' mistakes); negative =
     reaches. "espn_value": the same by ESPN's projections (what the room sees).
     "starters": projected points of their best starting lineup now.
+    "auto_espn" / "auto_mine": their picks against what ESPN autodraft would
+    have taken in their place (at each of their picks, ESPN's top projection
+    still available), added up by ESPN's numbers and by yours. ESPN's is
+    usually negative (anyone off ESPN's board loses by ESPN's numbers); yours
+    positive means they beat autodraft by your projections. The other teams'
+    picks are taken as they happened.
     """
     from .lineup import best_lineup
 
@@ -85,7 +91,22 @@ def draft_scores(state: DraftState) -> list[dict]:
     ps = [p for p in state.players.values() if not math.isnan(p.proj_points)]
     pool = sorted((p.proj_points for p in ps), reverse=True)
     espn_pool = sorted((p.room_points for p in ps), reverse=True)
-    out = [{"value": 0.0, "espn_value": 0.0, "starters": 0.0} for _ in range(league.num_teams)]
+    out = [{"value": 0.0, "espn_value": 0.0, "starters": 0.0, "auto_espn": 0.0, "auto_mine": 0.0}
+           for _ in range(league.num_teams)]
+    by_espn = sorted((p for p in ps if p.name != f"Unknown player {p.id}" and not p.id.startswith("unlisted-")),
+                     key=lambda p: (-p.room_points, -p.proj_points))
+    auto_took: list[set[str]] = [set() for _ in range(league.num_teams)]
+    taken: set[str] = set()
+    for k, pid in enumerate(state.picks):
+        t = league.team_for_pick(k)
+        p = state.players.get(pid)
+        auto = next((q for q in by_espn if q.id not in taken and q.id not in auto_took[t]), None)
+        taken.add(pid)
+        if p is None or auto is None or p.name == f"Unknown player {p.id}":
+            continue
+        auto_took[t].add(auto.id)
+        out[t]["auto_espn"] += p.room_points - auto.room_points
+        out[t]["auto_mine"] += p.proj_points - auto.proj_points
     for k, pid in enumerate(state.picks):
         p = state.players.get(pid)
         if p is None or p.name == f"Unknown player {p.id}" or k >= len(pool):

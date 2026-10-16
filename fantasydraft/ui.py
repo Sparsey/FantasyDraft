@@ -31,7 +31,7 @@ from .io import (apply_log, apply_manager, is_placeholder, league_managers, load
 from .learn import fit_teams
 from .lineup import over_targets, target_fill
 from .models import DraftState, Player, TeamProfile
-from .recommend import MIN_AVAIL, availability_sims, recommend, versus_highest_projection
+from .recommend import MIN_AVAIL, autodraft_value, availability_sims, recommend, versus_highest_projection
 from .room import RoomTracker
 from .simulate import availability, predict_picks
 
@@ -377,6 +377,7 @@ class Dashboard:
         if probs is None:
             probs = availability(st, sims=availability_sims(self.sims), seed=1)
         recs = recommend(st, candidates=self.candidates, sims=self.sims, avail=probs)
+        auto_value = autodraft_value(st, sims=self.sims)
         # The target: never below the floor (someone at least that good is
         # guaranteed); among those, the best plan with an even or better chance of
         # being there, else the one most likely to be there.
@@ -411,6 +412,7 @@ class Dashboard:
             **self._player_fields(r.player), **self._trend(st, r.player, probs),
             "p_now": r.p_avail_now, "p_after": r.p_avail_after,
             "value": round(r.exp_final_value),
+            "vs_auto": round(r.exp_final_value - auto_value),
             **vs_fields(r),
             "is_target": i == 0, "is_floor": r.player.id == floor, "p_best_up": self._cum.get(r.player.id),
             "tag": "gamble" if gamble and r.player.id == gamble["id"]
@@ -558,6 +560,7 @@ class Dashboard:
             "sources": self.source_names,
             "teams": [{
                 "score": round(scores[i]["value"]), "espn_score": round(scores[i]["espn_value"]),
+                "auto_espn": round(scores[i]["auto_espn"]), "auto_mine": round(scores[i]["auto_mine"]),
                 "starters": round(scores[i]["starters"]),
                 "starters_rank": 1 + sum(s["starters"] > scores[i]["starters"] for s in scores),
                 "slot": i, "name": names[i], "strategy": t.strategy, "noise": t.noise,

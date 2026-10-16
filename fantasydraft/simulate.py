@@ -149,7 +149,7 @@ class Simulator:
         return v
 
     def run(self, rng: random.Random, my_next: Player | None = None, i_pick: bool = True,
-            until: int | None = None) -> SimResult:
+            until: int | None = None, me_auto: bool = False) -> SimResult:
         """Simulate to the end of the draft.
 
         my_next: take this player at my next pick if still there (otherwise
@@ -157,6 +157,8 @@ class Simulator:
         i_pick:  if False, my turns are skipped and nobody is removed, which
                  isolates what opponents alone would take.
         until:   stop before this overall pick (for short-range predictions).
+        me_auto: my picks from here on are ESPN autodraft's (the top of ESPN's
+                 list), the baseline the dashboard's plans are compared with.
         """
         league = self.league
         taken = set(self.state.picks)
@@ -180,7 +182,9 @@ class Simulator:
             if team == league.my_slot:
                 if not i_pick:
                     continue
-                if forced is not None and forced.id not in taken:
+                if me_auto:
+                    choice = next(self._untaken("auto", taken))
+                elif forced is not None and forced.id not in taken:
                     choice = forced
                 else:
                     choice = self.my_greedy_pick(my_roster, taken)

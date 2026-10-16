@@ -1029,6 +1029,12 @@ def test_fetch_league_keeps_your_edits(tmp_path, monkeypatch):
     assert cfg["my_team"] == "Mine"
     bravo = cfg["teams"][2]
     assert bravo["strategy"] == "feel" and bravo["espn_id"] == 12  # renamed on ESPN, still matched
+    assert cfg["autodraft_top"] == 1.0  # a real league: ESPN autopick takes the top of its list
+
+    # With your login cookie, your team is the one you own, whatever my_team said.
+    Fake.league = lambda self: {"teams": [{"id": 12, "owners": ["{AB-CD}"]}]}
+    cmd_fetch_league(argparse.Namespace(**{**vars(args), "swid": "{ab-cd}"}))
+    assert json.loads(out.read_text())["my_team"] == "Bravo v2"
 
 
 def test_wrong_team_count_is_detected_and_restart_recovers(tmp_path):

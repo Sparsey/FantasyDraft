@@ -142,8 +142,6 @@
   .gap small { font-weight: 500; opacity: .8; }
   .gap.gup { color: var(--good); background: var(--good-soft); }
   .gap.gdn { color: var(--bad); background: var(--bad-soft); }
-  td.mup b { color: var(--good); }
-  td.mdn b { color: var(--bad); }
   .agr { font-size: 10.5px; font-weight: 600; color: var(--muted); margin-left: 4px; }
   .advice { margin: 8px 10px 4px; padding: 8px 11px; border-radius: 8px; font-size: 13px; line-height: 1.45;
             background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
@@ -235,18 +233,19 @@ function bar(p) {
   const cls = p >= 0.7 ? "hi" : p <= 0.3 ? "lo" : "";
   return `<span class="bar ${cls}"><i><b style="width:${Math.round(p * 100)}%"></b></i><span>${pct(p)}</span></span>`;
 }
-// ESPN's projection and yours, coloured by which way yours differs
-// (hover Mine: the difference and each source).
-const projHead = `<th class="num" title="ESPN's projection: what the room sees">ESPN</th>
-  <th class="num" title="Your combined projection (ESPN + your sources). Green: higher than ESPN's, red: lower. Hover a number for the difference and each source">Mine</th>`;
+// How far your projection is from ESPN's (+ = ESPN undervalues him by your
+// numbers), then yours. Hover the difference for ESPN's number and each source.
+const projHead = `<th class="num" title="Your projection minus ESPN's. Green +: ESPN undervalues him by your numbers (the room will let him fall); red −: ESPN rates him higher than you do. Hover for ESPN's number and each source">vs ESPN</th>
+  <th class="num" title="Your combined projection (ESPN + your sources)">Mine</th>`;
 const projCells = (x) => {
-  const d = x.espn != null ? Math.round(x.proj - x.espn) : 0;
-  const tip = [d ? `Mine − ESPN: ${d > 0 ? "+" : "−"}${Math.abs(d).toLocaleString()}` +
-      (x.espn ? ` (${d > 0 ? "+" : ""}${Math.round(d / x.espn * 100)}%)` : "") : "Same as ESPN",
+  const d = x.espn != null ? Math.round(x.proj - x.espn) : null;
+  const tip = [x.espn != null ? `ESPN ${x.espn.toLocaleString()}` +
+      (d && x.espn ? `, yours ${d > 0 ? "+" : ""}${Math.round(d / x.espn * 100)}%` : "") : "",
     x.agree ? `${x.agree[0]} of ${x.agree[1]} other sources agree` : "",
     (x.sources || []).map(([n, v]) => n + " " + v.toLocaleString()).join(" · ")].filter(Boolean).join("\n");
-  return `<td class="num muted">${x.espn != null ? x.espn.toLocaleString() : "–"}</td>
-    <td class="num ${Math.abs(d) < 1 ? "" : d > 0 ? "mup" : "mdn"}" title="${esc(tip)}"><b>${x.proj.toLocaleString()}</b></td>`;
+  const cell = d == null ? "–" : Math.abs(d) < 1 ? "0" : (d > 0 ? "+" : "−") + Math.abs(d).toLocaleString();
+  return `<td class="num ${d == null || Math.abs(d) < 1 ? "muted" : d > 0 ? "up" : "dn"}" title="${esc(tip)}">${cell}</td>
+    <td class="num"><b>${x.proj.toLocaleString()}</b></td>`;
 };
 function gambleWhy(g) {
   if (!g) return "";
@@ -457,6 +456,8 @@ function renderTeams() {
   $("teams").innerHTML = `<table class="teams"><thead><tr><th>Team</th>
       <th class="num" title="Rolling draft score by your combined projections: points of everyone they've taken minus what those pick numbers are normally worth. + = value fell to them; − = reaches">Score</th>
       <th class="num" title="The same score by ESPN's projections (what the room sees). Going off ESPN's board for your own list shows up here as a small minus">ESPN</th>
+      <th class="num" title="Their picks against ESPN autodraft in their place (ESPN's top projection still available at each of their picks), added up by ESPN's numbers. Usually 0 or −: anyone off ESPN's board loses by ESPN's numbers">vs auto ESPN</th>
+      <th class="num" title="The same comparison with ESPN autodraft, by your projections. + = their picks beat what autodraft would have taken, by your numbers">vs auto Mine</th>
       <th class="num" title="Projected points of their best starting lineup now (your numbers), ranked among the teams">Starters</th>
       <th title="How the simulation predicts this team right now: autodraft, the strategy that best fits their picks so far (with how sure it is), or one set in your league file. Hover a team for details">Model</th>
       <th title="On autodraft now (ESPN picks by its rank, no randomness). Follows the draft room; click to set by hand">Auto</th></tr></thead><tbody>` +
@@ -466,6 +467,8 @@ function renderTeams() {
         <td><span class="muted">${t.slot + 1}</span> <span class="nm">${esc(t.name)}${t.me ? " (you)" : ""}</span></td>
         <td class="num ${t.score > 0 ? "up" : t.score < 0 ? "dn" : "muted"}">${t.count ? signed(t.score) : "–"}</td>
         <td class="num muted">${t.count ? signed(t.espn_score) : "–"}</td>
+        <td class="num ${t.auto_espn > 0 ? "up" : t.auto_espn < 0 ? "dn" : "muted"}">${t.count ? signed(t.auto_espn) : "–"}</td>
+        <td class="num ${t.auto_mine > 0 ? "up" : t.auto_mine < 0 ? "dn" : "muted"}">${t.count ? signed(t.auto_mine) : "–"}</td>
         <td class="num">${t.count ? `${t.starters.toLocaleString()} <span class="muted">#${t.starters_rank}</span>` : "–"}</td>
         <td class="model">${modelTxt(t)}</td>
         <td><span class="toggle${t.auto ? " on" : ""}" data-slot="${t.slot}" data-on="${t.auto ? 0 : 1}">${t.auto ? "AUTO" : ""}<span class="sw"></span></span></td>
@@ -476,14 +479,15 @@ function renderTeams() {
 function renderTable(r) {
   const body = $("tablebody");
   if (tab === "recs") {
-    const cols = (r.has_sources ? 3 : 2) + 3 + (manual() ? 1 : 0);
+    const cols = (r.has_sources ? 3 : 2) + 4 + (manual() ? 1 : 0);
     if (!r.recs) { body.innerHTML = `<div class="empty-note">Working out recommendations…</div>`; return; }
     if (!r.recs.length) { body.innerHTML = `<div class="empty-note">Nothing to recommend — your draft is done.</div>`; return; }
     body.innerHTML = `<table><thead><tr><th>Player</th>
       ${r.has_sources ? projHead : `<th class="num">Proj</th>`}
       <th class="num" title="Chance the player is still there at your next pick">At my pick</th>
       <th class="num" title="Chance the player lasts to the pick after that, if you pass">Lasts</th>
-      <th class="num" title="Final roster value (by your combined numbers) compared with taking ESPN's pick, averaged over simulated drafts. Hover a value for how often it ends better or worse">vs ESPN pick</th>
+      <th class="num" title="Monte Carlo: your final roster value (by your combined numbers) if you take him, compared with taking ESPN's pick, averaged over the same simulated drafts. Hover a value for how often it ends better or worse">Monte Carlo</th>
+      <th class="num" title="Your final roster value if you take him (then the dashboard's picks), compared with letting ESPN autodraft for you from here on, over the same simulated drafts">vs auto</th>
       ${manual() ? "<th></th>" : ""}</tr></thead><tbody>` +
       r.recs.map((x, i) => availLine(r, i, cols) + `<tr class="${x.is_target ? "top" : ""}${x.is_floor ? " floor" : ""}" ${x.value != null ? `title="Final roster value ${x.value.toLocaleString()}"` : ""}>
         <td><span class="pname">${esc(x.name)}</span><span class="pos">${esc(x.pos)} ${esc(x.team || "")}</span>${tagTxt(x, r)}</td>
@@ -491,6 +495,7 @@ function renderTable(r) {
         <td class="num">${changeTxt(x)}${bar(x.p_now)}</td><td class="num">${bar(x.p_after)}</td>
         ${x.is_baseline ? `<td class="num muted">ESPN pick</td>`
           : `<td class="num ${x.vs_top > 0 ? "up" : x.vs_top < 0 ? "dn" : "muted"}" title="${esc(riskTip(x))}">${x.vs_top == null ? (r.stage === "full" ? "–" : "…") : (x.vs_top > 0 ? "+" : "") + x.vs_top}</td>`}
+        <td class="num ${x.vs_auto > 0 ? "up" : x.vs_auto < 0 ? "dn" : "muted"}">${x.vs_auto == null ? (r.stage === "full" ? "–" : "…") : signed(x.vs_auto)}</td>
         ${manual() ? `<td>${addBtn(x.id)}</td>` : ""}</tr>`).join("") + `</tbody></table>`;
   } else if (tab === "under") {
     const U = r.underrated || [];

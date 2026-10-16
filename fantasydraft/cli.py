@@ -430,11 +430,15 @@ def cmd_fetch_league(args) -> None:
     my_old = old_teams[my - 1] if isinstance(my, int) and 0 < my <= len(old_teams) else \
         next((t for t in old_teams if t["name"] == my), None)
     order = client.pick_order(data)
+    # Your team: the one your ESPN login (SWID) owns, when the cookie is set.
+    swid = (args.swid or "").strip().strip("{}").upper()
+    mine_by_login = next((t["id"] for t in data.get("teams", [])
+                          if swid and swid in {o.strip("{}").upper() for o in t.get("owners", [])}), None)
     teams, my_name = [], None
     for tid in order:
         prev = by_id.get(tid) or by_name.get(names[tid]) or {"strategy": "unknown", "noise": 0.2}
         entry = {**prev, "name": names[tid], "espn_id": tid, **({"owner": owners[tid]} if tid in owners else {})}
-        if my_old is not None and prev is my_old:
+        if (mine_by_login == tid) or (mine_by_login is None and my_old is not None and prev is my_old):
             my_name = names[tid]
         teams.append(entry)
     scoring = client.scoring(data)
@@ -447,8 +451,14 @@ def cmd_fetch_league(args) -> None:
         "scoring": scoring or existing.get("scoring"),
         "espn_team_ids": order,
         "teams": teams,
+        # A real league: ESPN autopick always takes the top of a team's list.
+        "autodraft_top": 1.0,
     }
     out.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    print("Draft order:")
+    for i, t in enumerate(teams):
+        print(f"  {i + 1:>2}. {t['name']}" + (f" ({t['owner']})" if t.get("owner") else "")
+              + ("   <- you" if t["name"] == my_name else ""))
     me = cfg["my_team"]
     print(f"wrote {out}. You are: {me if isinstance(me, str) else f'draft position {me}'}"
           " (check 'my_team' is right once ESPN sets the draft order)")
